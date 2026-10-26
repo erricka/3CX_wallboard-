@@ -8,6 +8,7 @@ e.g. /xapi/v1/ReportCallLogData/Pbx.GetCallLogData(periodFrom=...,periodTo=...,.
 
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -18,6 +19,8 @@ log = logging.getLogger(__name__)
 
 API = "/xapi/v1"
 USER_FIELDS = ["Id", "Number", "FirstName", "LastName", "CurrentProfileName", "IsRegistered", "QueueStatus"]
+# 3CX caps $top per endpoint and says so: "The limit of '100' for Top query has been exceeded."
+_TOP_LIMIT = re.compile(r"limit of '(\d+)' for Top")
 
 
 class ThreeCXError(Exception):
@@ -53,6 +56,7 @@ class ThreeCXClient:
         self._token_expiry = 0.0
         self._token_lock = asyncio.Lock()
         self._user_fields = list(USER_FIELDS)
+        self._max_top: dict[str, int] = {}
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -95,31 +99,40 @@ class ThreeCXClient:
         raise ThreeCXError("3CX rejected the access token", 401)
 
     async def get_all(self, path: str, params: dict | None = None, page_size: int = 1000) -> list[dict]:
+        endpoint = path.split("(")[0]
         rows: list[dict] = []
         skip = 0
         while True:
-            page = await self.get(path, {**(params or {}), "$top": page_size, "$skip": skip})
+            top = self._max_top.get(endpoint, page_size)
+            try:
+                page = await self.get(path, {**(params or {}), "$top": top, "$skip": skip})
+            except ThreeCXError as exc:
+                limit = _TOP_LIMIT.search(str(exc)) if exc.status == 400 else None
+                if limit and int(limit.group(1)) < top:
+                    self._max_top[endpoint] = int(limit.group(1))
+                    continue
+                raise
             batch = page.get("value", [])
             rows.extend(batch)
-            if len(batch) < page_size:
+            if len(batch) < top:
                 return rows
-            skip += page_size
+            skip += top
 
     # ---- live state -------------------------------------------------------------
 
     async def list_users(self) -> list[dict]:
         try:
-            return await self.get_all(f"{API}/Users", {"$select": ",".join(self._user_fields)}, page_size=500)
+            return await self.get_all(f"{API}/Users", {"$select": ",".join(self._user_fields)})
         except ThreeCXError as exc:
             # Older v20 builds have no QueueStatus property; $select on it returns 400.
-            if exc.status == 400 and "QueueStatus" in self._user_fields:
+            if exc.status == 400 and "QueueStatus" in str(exc) and "QueueStatus" in self._user_fields:
                 log.warning("Users.QueueStatus not supported by this 3CX build; using IsRegistered instead")
                 self._user_fields.remove("QueueStatus")
                 return await self.list_users()
             raise
 
     async def list_queues(self) -> list[dict]:
-        return await self.get_all(f"{API}/Queues", {"$select": "Id,Number,Name", "$expand": "Agents"}, page_size=200)
+        return await self.get_all(f"{API}/Queues", {"$select": "Id,Number,Name", "$expand": "Agents"})
 
     async def active_calls(self) -> list[dict]:
         return (await self.get(f"{API}/ActiveCalls")).get("value", [])

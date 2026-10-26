@@ -131,3 +131,30 @@ def test_build_snapshot_statuses_and_queue_counters():
     assert snap["queues"] == [{"number": "800", "name": "Inbound", "agents_in_work": 4, "agents_free": 1,
                                "agents_talk": 1, "calls_waiting": 1, "max_wait_seconds": 42,
                                "answered": 104, "missed": 14}]
+
+
+async def test_client_adapts_to_3cx_top_limit_and_keeps_queue_status():
+    import httpx
+
+    from app.threecx import ThreeCXClient
+
+    users = [{"Number": str(100 + i)} for i in range(250)]
+    selects = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/connect/token":
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        top, skip = int(request.url.params["$top"]), int(request.url.params["$skip"])
+        selects.append(request.url.params["$select"])
+        if top > 100:  # what the PBX returned
+            return httpx.Response(400, json={"error": {"code": "", "message":
+                "The query specified in the URI is not valid. The limit of '100' for Top query has been exceeded. "
+                f"The value from the incoming request is '{top}'.", "details": []}})
+        return httpx.Response(200, json={"value": users[skip:skip + top]})
+
+    client = ThreeCXClient("https://pbx.example", "id", "secret", transport=httpx.MockTransport(handler))
+    assert await client.list_users() == users
+    assert all("QueueStatus" in s for s in selects)
+    await client.list_users()
+    assert len(selects) == 1 + 3 + 3  # one refused request, then 100-row pages only
+    await client.close()
