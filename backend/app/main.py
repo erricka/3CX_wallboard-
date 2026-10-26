@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -29,11 +30,10 @@ def create_app(settings: Settings | None = None, client: ThreeCXClient | None = 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         engine = make_engine(settings.database_url)
-        await init_db(engine)
         threecx = client or ThreeCXClient(settings.threecx_base_url, settings.threecx_client_id,
                                           settings.threecx_client_secret, settings.threecx_verify_ssl)
         service = WallboardService(settings, threecx, make_sessionmaker(engine))
-        await service.start()
+        service.start(prepare_db=lambda: init_db(engine))
         app.state.service = service
         yield
         await service.stop()
@@ -78,6 +78,8 @@ def create_app(settings: Settings | None = None, client: ThreeCXClient | None = 
     @app.get("/api/reports/daily")
     async def daily_report(request: Request, period: Period = "today", format: Literal["xlsx", "csv"] = "xlsx"):
         service: WallboardService = request.app.state.service
+        if not service.db_ready:
+            raise HTTPException(503, "The PostgreSQL database is not ready yet")
         days = period_days(period, settings.tz)
         warnings = await service.ensure_synced(days)
         async with service.sessionmaker() as session:
@@ -95,6 +97,9 @@ def create_app(settings: Settings | None = None, client: ThreeCXClient | None = 
         return {"threecx": settings.threecx_base_url, "all_ok": all(r["ok"] for r in results), "checks": results}
 
     if settings.static_dir:
-        app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="frontend")
+        if (Path(settings.static_dir) / "index.html").exists():
+            app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="frontend")
+        else:
+            logging.getLogger(__name__).warning("No built frontend in %s; serving the API only", settings.static_dir)
 
     return app

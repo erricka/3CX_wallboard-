@@ -38,16 +38,30 @@ class WallboardService:
         self._statuses: dict[str, str] = {}
         self._day_locks: dict[date, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._tasks: list[asyncio.Task] = []
+        self.db_ready = False
 
     # ---- lifecycle --------------------------------------------------------------
 
-    async def start(self) -> None:
+    def start(self, prepare_db) -> None:
+        """Start background work. The web server is already serving while the database comes up."""
+        self._tasks = [asyncio.create_task(self._run(prepare_db))]
+
+    async def _run(self, prepare_db) -> None:
+        while True:
+            try:
+                await prepare_db()
+                break
+            except Exception as exc:
+                log.warning("Database not ready: %s", exc)
+                self._publish_error(f"Waiting for the PostgreSQL database: {exc}")
+                await asyncio.sleep(3)
         async with self.sessionmaker() as session, session.begin():
             # Rows left open by a previous run end when that run was last seen.
             await session.execute(
                 update(AgentStatusLog).where(AgentStatusLog.ended_at.is_(None))
                 .values(ended_at=func.coalesce(AgentStatusLog.last_seen_at, AgentStatusLog.started_at)))
-        self._tasks = [asyncio.create_task(self._poll_loop()), asyncio.create_task(self._stats_loop())]
+        self.db_ready = True
+        await asyncio.gather(self._poll_loop(), self._stats_loop())
 
     async def stop(self) -> None:
         for task in self._tasks:
@@ -86,7 +100,7 @@ class WallboardService:
                 await self.poll_once()
             except Exception as exc:  # keep polling through 3CX/network hiccups
                 log.warning("Wallboard poll failed: %s", exc)
-                self._publish_error(str(exc))
+                self._publish_error(f"Cannot load live data from 3CX: {exc}")
             await asyncio.sleep(max(interval - (time.monotonic() - started), 0.5))
 
     async def poll_once(self) -> None:
@@ -110,7 +124,7 @@ class WallboardService:
 
     def _publish_error(self, message: str) -> None:
         base = dict(self.snapshot) if self.snapshot else {"queues": [], "agents": [], "generated_at": None}
-        base["errors"] = [f"Cannot load live data from 3CX: {message}"]
+        base["errors"] = [message]
         base["stale"] = True
         self._publish(base)
 
