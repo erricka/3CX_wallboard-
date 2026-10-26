@@ -1,0 +1,32 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Creates a PostgreSQL database and the wallboard web service in Singapore.
+databases:
+  - name: wallboard-db
+    plan: free
+    region: singapore
+    databaseName: wallboard
+    user: wallboard
+
+services:
+  - type: web
+    name: 3cx-wallboard
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: wallboard-db
+          property: connectionString
+      - key: THREECX_BASE_URL
+        value: https://maxbit.3cx.asia
+      - key: THREECX_CLIENT_ID
+        value: dashboardamk
+      - key: THREECX_CLIENT_SECRET
+        sync: false   # Render asks for the API key when you create the Blueprint
+      - key: TIMEZONE
+        value: Asia/Phnom_Penh
+      - key: WALLBOARD_QUEUES
+        value: ""

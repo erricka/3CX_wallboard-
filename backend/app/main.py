@@ -5,9 +5,11 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 
 from .config import Settings, get_settings
 from .db import init_db, make_engine, make_sessionmaker
+from .diagnostics import run_checks
 from .reports import load_report, to_csv, to_xlsx
 from .service import WallboardService
 from .threecx import ThreeCXClient
@@ -85,5 +87,14 @@ def create_app(settings: Settings | None = None, client: ThreeCXClient | None = 
         body = to_xlsx(data) if format == "xlsx" else to_csv(data)
         return Response(body, media_type=FORMATS[format], headers={
             "Content-Disposition": f'attachment; filename="{data.filename_stem}.{format}"'})
+
+    @app.get("/api/diagnostics")
+    async def diagnostics(request: Request):
+        """Which 3CX endpoints work on this PBX (field names only, no call data)."""
+        results, _ = await run_checks(request.app.state.service.client, settings)
+        return {"threecx": settings.threecx_base_url, "all_ok": all(r["ok"] for r in results), "checks": results}
+
+    if settings.static_dir:
+        app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="frontend")
 
     return app

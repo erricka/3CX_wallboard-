@@ -14,23 +14,17 @@ services:
       timeout: 3s
       retries: 20
 
-  backend:
-    build: ./backend
+  app:
+    build: .
     restart: unless-stopped
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://wallboard:${POSTGRES_PASSWORD}@db:5432/wallboard
+    ports:
+      - "${WALLBOARD_PORT:-8080}:8000"
     depends_on:
       db:
         condition: service_healthy
-
-  frontend:
-    build: ./frontend
-    restart: unless-stopped
-    ports:
-      - "${WALLBOARD_PORT:-8080}:80"
-    depends_on:
-      - backend
 
 volumes:
   pgdata:

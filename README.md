@@ -2,7 +2,7 @@
 
 Live call-center wallboard for 3CX v20 with downloadable daily reports.
 
-- **Frontend:** React (Vite), served by nginx
+- **Frontend:** React (Vite), built into the same Docker image and served by the backend
 - **Backend:** Python (FastAPI). Polls the 3CX XAPI and pushes updates over a WebSocket.
 - **Database:** PostgreSQL. Stores daily stats, the call log, agent login sessions and the status history.
 
@@ -61,18 +61,33 @@ python -m scripts.probe_3cx
 The probe calls every endpoint the wallboard uses, prints `OK`/`FAIL` with the field names, and saves samples in `backend/probe-output/`.
 If anything fails, the error message names the endpoint and the HTTP status.
 
-## 4. Run with Docker (server or PC that can reach the PBX)
+## 4. Host it
+
+### Option A: Render (free, gives you a public URL)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/erricka/3cx_wallboard-)
+
+1. Click the button and sign in to Render (a GitHub login works).
+2. Render reads `render.yaml`. It creates a PostgreSQL database and the wallboard web service in Singapore.
+3. When asked for `THREECX_CLIENT_SECRET`, paste the 3CX API key. Click **Apply**.
+4. The first build takes about 5 minutes. Then open `https://3cx-wallboard-XXXX.onrender.com`.
+5. Check `https://<your-url>/api/diagnostics`: every check should say `"ok": true`.
+
+On the free plan, the service sleeps after 15 minutes with no visitors, and the database expires after 30 days.
+For a wallboard on a TV all day, use the Starter plan (a few dollars a month) or option B.
+
+### Option B: Docker on your own server or PC
+
+On any machine that can reach `maxbit.3cx.asia`:
 
 ```bash
 docker compose up -d --build
 ```
 
 Open `http://<server>:8080`. Change the port with `WALLBOARD_PORT` in `.env`.
-Logs: `docker compose logs -f backend`.
+Logs: `docker compose logs -f app`. Probe: `docker compose run --rm app python -m scripts.probe_3cx`.
 
-To put it on the internet as a website, run this on any VPS or office server that can reach `maxbit.3cx.asia`.
-Then point a domain at it, ideally behind HTTPS (for example Caddy or nginx with Let's Encrypt).
-The wallboard has no login of its own, so restrict access (VPN, IP allow-list, or basic auth on the reverse proxy) if it is public.
+The wallboard has no login of its own. If it is on the public internet, restrict access: a VPN, an IP allow-list, or basic auth on a reverse proxy.
 
 ## Local development
 
@@ -112,6 +127,7 @@ The Excel workbook has four sheets:
 | `WS /ws/wallboard` | snapshot pushed on every poll |
 | `GET /api/reports/daily` | report download |
 | `GET /api/health` | health check |
+| `GET /api/diagnostics` | tests every 3CX endpoint (status and field names only) |
 
 ## Database tables
 

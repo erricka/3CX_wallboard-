@@ -1,6 +1,7 @@
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +29,17 @@ class Settings(BaseSettings):
     backfill_days: int = 31
 
     cors_origins: str = "http://localhost:5173"
+    # Built React app to serve at "/" (set in the Docker image); empty = API only.
+    static_dir: str = ""
+
+    @field_validator("database_url")
+    @classmethod
+    def use_asyncpg(cls, url: str) -> str:
+        # Hosting providers hand out postgres:// or postgresql:// URLs.
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                return "postgresql+asyncpg://" + url[len(prefix):]
+        return url
 
     @property
     def tz(self) -> ZoneInfo:

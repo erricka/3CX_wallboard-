@@ -1,5 +1,0 @@
-__pycache__
-.pytest_cache
-tests
-probe-output
-.env
