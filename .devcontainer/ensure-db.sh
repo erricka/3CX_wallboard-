@@ -4,7 +4,11 @@
 set -e
 
 pg_isready -q -h 127.0.0.1 2>/dev/null || sudo service postgresql start
-sudo runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'wallboard'" | grep -q 1 \
-  || sudo runuser -u postgres -- psql -qc "CREATE USER wallboard PASSWORD 'wallboard'"
+# Create the user, or reset its password in case an earlier, interrupted setup left a different one.
+if sudo runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'wallboard'" | grep -q 1; then
+  sudo runuser -u postgres -- psql -qc "ALTER USER wallboard PASSWORD 'wallboard'"
+else
+  sudo runuser -u postgres -- psql -qc "CREATE USER wallboard PASSWORD 'wallboard'"
+fi
 sudo runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'wallboard'" | grep -q 1 \
   || sudo runuser -u postgres -- createdb -E UTF8 -T template0 -O wallboard wallboard
