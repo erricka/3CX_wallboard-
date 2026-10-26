@@ -7,6 +7,10 @@ services:
       - ../..:/workspaces:cached
     environment:
       DATABASE_URL: postgresql+asyncpg://wallboard:wallboard@db:5432/wallboard
+      THREECX_BASE_URL: https://maxbit.3cx.asia
+      THREECX_CLIENT_ID: dashboardamk
+      TIMEZONE: Asia/Phnom_Penh
+      # THREECX_CLIENT_SECRET comes from a Codespaces secret or a .env file in the repo root
     depends_on:
       - db
 

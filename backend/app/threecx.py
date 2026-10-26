@@ -61,6 +61,8 @@ class ThreeCXClient:
         async with self._token_lock:
             if not force and self._token and time.monotonic() < self._token_expiry:
                 return self._token
+            if not self._client_id or not self._client_secret:
+                raise ThreeCXError("3CX API credentials are not set (THREECX_CLIENT_ID / THREECX_CLIENT_SECRET)")
             try:
                 resp = await self._http.post("/connect/token", data={
                     "client_id": self._client_id,

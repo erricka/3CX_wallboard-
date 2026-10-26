@@ -10,8 +10,8 @@ class Settings(BaseSettings):
 
     # 3CX XAPI credentials (Admin Console > Integrations > API)
     threecx_base_url: str = "https://maxbit.3cx.asia"
-    threecx_client_id: str
-    threecx_client_secret: str
+    threecx_client_id: str = ""
+    threecx_client_secret: str = ""
     threecx_verify_ssl: bool = True
 
     database_url: str = "postgresql+asyncpg://wallboard:wallboard@localhost:5432/wallboard"

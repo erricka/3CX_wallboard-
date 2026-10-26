@@ -4,12 +4,19 @@
   "service": "dev",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   "features": {
-    "ghcr.io/devcontainers/features/node:1": { "version": "20" }
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    }
   },
-  "forwardPorts": [8000],
+  "forwardPorts": [
+    8000
+  ],
   "portsAttributes": {
-    "8000": { "label": "Wallboard", "onAutoForward": "openBrowser" }
+    "8000": {
+      "label": "Wallboard",
+      "onAutoForward": "openBrowser"
+    }
   },
   "postCreateCommand": "pip install --user -r backend/requirements.txt && cd frontend && npm ci --no-audit --no-fund && npm run build",
-  "postStartCommand": "nohup bash .devcontainer/run.sh > /tmp/wallboard.log 2>&1 &"
+  "postStartCommand": "setsid nohup bash .devcontainer/run.sh > /tmp/wallboard.log 2>&1 < /dev/null &"
 }
