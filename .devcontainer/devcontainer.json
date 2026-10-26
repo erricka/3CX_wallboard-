@@ -1,22 +1,19 @@
 {
   "name": "3CX Wallboard",
-  "dockerComposeFile": "docker-compose.yml",
-  "service": "dev",
-  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
   "features": {
-    "ghcr.io/devcontainers/features/node:1": {
-      "version": "20"
-    }
+    "ghcr.io/devcontainers/features/node:1": { "version": "20" }
   },
-  "forwardPorts": [
-    8000
-  ],
+  "containerEnv": {
+    "DATABASE_URL": "postgresql+asyncpg://wallboard:wallboard@127.0.0.1:5432/wallboard",
+    "THREECX_BASE_URL": "https://maxbit.3cx.asia",
+    "THREECX_CLIENT_ID": "dashboardamk",
+    "TIMEZONE": "Asia/Phnom_Penh"
+  },
+  "forwardPorts": [8000],
   "portsAttributes": {
-    "8000": {
-      "label": "Wallboard",
-      "onAutoForward": "openBrowser"
-    }
+    "8000": { "label": "Wallboard", "protocol": "http", "onAutoForward": "openBrowser" }
   },
-  "postCreateCommand": "pip install --user -r backend/requirements.txt && cd frontend && npm ci --no-audit --no-fund && npm run build",
+  "postCreateCommand": "bash .devcontainer/setup.sh",
   "postStartCommand": "setsid nohup bash .devcontainer/run.sh > /tmp/wallboard.log 2>&1 < /dev/null &"
 }

@@ -3,6 +3,8 @@
 set -e
 cd "$(dirname "$0")/.."
 
+pg_isready -q -h 127.0.0.1 2>/dev/null || sudo service postgresql start
+
 python -c "import uvicorn, fastapi, asyncpg" 2>/dev/null || pip install --user -r backend/requirements.txt
 if [ ! -f frontend/dist/index.html ]; then
   (cd frontend && npm ci --no-audit --no-fund && npm run build)

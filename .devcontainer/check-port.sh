@@ -15,8 +15,5 @@ echo "== 2. Through GitHub's link ($URL)"
 curl -s -m 20 -D - -o /tmp/forwarded-body.txt -H "X-Github-Token: $GITHUB_TOKEN" "$URL" | head -12 | sed 's/^/   /'
 echo "   body: $(head -c 200 /tmp/forwarded-body.txt | tr '\n' ' ')"
 
-echo "== Ports as GitHub sees them"
-gh codespace ports -c "$CODESPACE_NAME" 2>&1 | sed 's/^/   /'
-
 echo "== Last wallboard log lines"
 tail -n 8 /tmp/wallboard.log 2>/dev/null | sed 's/^/   /' || echo "   (no /tmp/wallboard.log: started from a terminal?)"
