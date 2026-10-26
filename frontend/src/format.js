@@ -12,6 +12,7 @@ export function waitTime(seconds) {
   return `${pad(Math.floor(s / 60))}:${pad(s % 60)}`
 }
 
-export function clockTime(iso) {
-  return iso ? new Date(iso).toLocaleTimeString() : '—'
+// Times are shown in the call centre's timezone (from the server), whatever the PC is set to.
+export function clockTime(iso, timeZone) {
+  return iso ? new Date(iso).toLocaleTimeString(undefined, { timeZone }) : '—'
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import AgentTable from './components/AgentTable.jsx'
 import QueueCards from './components/QueueCards.jsx'
 import ReportDownload from './components/ReportDownload.jsx'
+import logo from './brand/amk-logo-white.svg'
 import { clockTime } from './format.js'
 import { useWallboard } from './useWallboard.js'
 
@@ -20,12 +21,14 @@ export default function App() {
   const live = connected && snapshot && !snapshot.stale
   const agents = snapshot?.agents ?? []
   const loggedIn = agents.filter((a) => a.logged_in).length
+  const timeZone = snapshot?.timezone
 
   return (
     <div className="page">
       <header className="topbar">
         <div className="brand">
-          <h1>3CX Wallboard</h1>
+          <img className="brand-logo" src={logo} alt="AMK" />
+          <h1>Call Center Wallboard</h1>
           {snapshot && !live && (
             <span className="conn conn-down">
               <i className="dot" />
@@ -34,9 +37,9 @@ export default function App() {
           )}
         </div>
         <div className="clock">
-          <span className="clock-time">{now.toLocaleTimeString()}</span>
+          <span className="clock-time">{now.toLocaleTimeString(undefined, { timeZone })}</span>
           <span className="clock-date">
-            {now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            {now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone })}
           </span>
         </div>
         <ReportDownload />
@@ -67,7 +70,7 @@ export default function App() {
 
             <footer className="footnote">
               Status updates every 3 seconds · daily counters since 00:00 ({snapshot.timezone}), refreshed{' '}
-              {clockTime(snapshot.stats_synced_at)} · last update {clockTime(snapshot.generated_at)}
+              {clockTime(snapshot.stats_synced_at, timeZone)} · last update {clockTime(snapshot.generated_at, timeZone)}
             </footer>
           </>
         ) : (

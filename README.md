@@ -1,10 +1,14 @@
-# 3CX Real-time Wallboard
+# AMK Call Center Wallboard (3CX)
 
-Real-time call-center wallboard for 3CX v20 with downloadable daily reports.
+Real-time call-center wallboard for 3CX v20 with downloadable daily reports, styled for AMK Bank
+and built for a large office TV: queues on the left, up to 30 agents on the right, all on one screen.
 
 - **Frontend:** React (Vite), built into the same Docker image and served by the backend
 - **Backend:** Python (FastAPI). Polls the 3CX XAPI and pushes updates over a WebSocket.
 - **Database:** PostgreSQL. Stores daily stats, the call log, agent login sessions and the status history.
+- **Brand:** AMK colours (#A53C6F, #5B0B30, #FFF2F9), fonts Lato and Kantumruy Pro (bundled, no internet
+  needed on the TV), and the AMK logo from amkbank.com.kh in `frontend/src/brand/`. The AMK name and logo
+  belong to AMK Bank Plc.
 
 ## How it works
 
