@@ -21,6 +21,8 @@ API = "/xapi/v1"
 USER_FIELDS = ["Id", "Number", "FirstName", "LastName", "CurrentProfileName", "IsRegistered", "QueueStatus"]
 # 3CX caps $top per endpoint and says so: "The limit of '100' for Top query has been exceeded."
 _TOP_LIMIT = re.compile(r"limit of '(\d+)' for Top")
+# (extensionFilter, callArea) pairs to try: some builds answer 500 for '' / 0.
+EXTENSION_STATS_VARIANTS = [("", 0), (None, 0), ("", 1), (None, 1), ("", 2), (None, 2)]
 
 
 class ThreeCXError(Exception):
@@ -33,7 +35,9 @@ def odata_args(**kwargs) -> str:
     """Render OData function arguments: dates unquoted UTC, strings quoted and URL-encoded."""
     parts = []
     for key, value in kwargs.items():
-        if isinstance(value, bool):
+        if value is None:
+            rendered = "null"
+        elif isinstance(value, bool):
             rendered = "true" if value else "false"
         elif isinstance(value, int):
             rendered = str(value)
@@ -57,6 +61,8 @@ class ThreeCXClient:
         self._token_lock = asyncio.Lock()
         self._user_fields = list(USER_FIELDS)
         self._max_top: dict[str, int] = {}
+        # Working EXTENSION_STATS_VARIANTS entry once found; False when none works on this PBX.
+        self._ext_stats_args: tuple | bool | None = None
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -147,8 +153,27 @@ class ThreeCXClient:
     # ---- reports (all ranges are UTC datetimes) ---------------------------------
 
     async def extension_statistics(self, start: datetime, end: datetime) -> list[dict]:
-        args = odata_args(periodFrom=start, periodTo=end, extensionFilter="", callArea=0)
-        return await self.get_all(f"{API}/ReportExtensionStatistics/Pbx.GetExtensionStatisticsData({args})")
+        if self._ext_stats_args is False:
+            raise ThreeCXError("ReportExtensionStatistics returns 500 on this PBX for every argument variant", 500)
+        variants = [self._ext_stats_args] if self._ext_stats_args else EXTENSION_STATS_VARIANTS
+        error = None
+        for extension_filter, call_area in variants:
+            args = odata_args(periodFrom=start, periodTo=end, extensionFilter=extension_filter, callArea=call_area)
+            try:
+                rows = await self.get_all(f"{API}/ReportExtensionStatistics/Pbx.GetExtensionStatisticsData({args})")
+            except ThreeCXError as exc:
+                if exc.status != 500:
+                    raise
+                error = exc
+                continue
+            if self._ext_stats_args is None:
+                log.info("ReportExtensionStatistics works with extensionFilter=%r, callArea=%s",
+                         extension_filter, call_area)
+            self._ext_stats_args = (extension_filter, call_area)
+            return rows
+        if self._ext_stats_args is None:
+            self._ext_stats_args = False
+        raise error
 
     async def queue_performance_totals(self, start: datetime, end: datetime, queue_dns: list[str]) -> list[dict]:
         args = odata_args(periodFrom=start, periodTo=end, queueDns=",".join(queue_dns), waitInterval="0:00:00")

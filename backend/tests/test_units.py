@@ -183,3 +183,28 @@ def test_call_log_counts_fallback():
     assert (agents["103"]["inbound"], agents["103"]["missed"], agents["103"]["outbound"]) == (0, 1, 1)
     assert agents["103"]["talk_seconds"] == 30
     assert queues["800"] == {"name": "", "received": 2, "answered": 1, "missed": 1}
+
+
+async def test_extension_statistics_finds_working_arguments():
+    import httpx
+
+    from app.threecx import ThreeCXClient
+
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/connect/token":
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        calls.append(request.url.path)
+        if "callArea=1" not in request.url.path:  # this PBX only accepts callArea=1
+            return httpx.Response(500)
+        return httpx.Response(200, json={"value": [{"Dn": "101"}]})
+
+    client = ThreeCXClient("https://pbx.example", "id", "secret", transport=httpx.MockTransport(handler))
+    start = datetime(2026, 10, 25, 17, tzinfo=UTC)
+    assert await client.extension_statistics(start, start + timedelta(days=1)) == [{"Dn": "101"}]
+    assert "extensionFilter='',callArea=1" in calls[-1] and len(calls) == 3
+    await client.extension_statistics(start, start + timedelta(days=1))
+    assert len(calls) == 4  # remembered: straight to the working arguments
+    assert "extensionFilter=null" in odata_args(extensionFilter=None)
+    await client.close()
