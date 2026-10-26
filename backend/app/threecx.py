@@ -67,9 +67,12 @@ class ThreeCXClient:
     async def close(self) -> None:
         await self._http.aclose()
 
-    async def _get_token(self, force: bool = False) -> str:
+    async def _get_token(self, rejected: str | None = None) -> str:
+        """Current access token. Pass the token 3CX just rejected to get a new one; if another
+        request already replaced it, that newer token is reused instead of asking again (asking
+        again could invalidate the token the other request is using)."""
         async with self._token_lock:
-            if not force and self._token and time.monotonic() < self._token_expiry:
+            if self._token and self._token != rejected and time.monotonic() < self._token_expiry:
                 return self._token
             if not self._client_id or not self._client_secret:
                 raise ThreeCXError("3CX API credentials are not set (THREECX_CLIENT_ID / THREECX_CLIENT_SECRET)")
@@ -91,8 +94,9 @@ class ThreeCXClient:
             return self._token
 
     async def _request(self, path: str, params: dict | None = None) -> httpx.Response:
+        token = None
         for attempt in range(2):
-            token = await self._get_token(force=attempt > 0)
+            token = await self._get_token(rejected=token)
             try:
                 resp = await self._http.get(path, params=params, headers={"Authorization": f"Bearer {token}"})
             except httpx.HTTPError as exc:

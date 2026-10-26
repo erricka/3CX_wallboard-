@@ -226,3 +226,29 @@ def test_call_log_counts_uses_direction_field():
     assert (agents["1001"]["inbound"], agents["1001"]["outbound"], agents["1001"]["missed"]) == (0, 1, 0)
     assert (agents["1002"]["inbound"], agents["1002"]["outbound"], agents["1002"]["missed"]) == (0, 0, 1)
     assert agents["1001"]["talk_seconds"] == 30 and agents["1002"]["talk_seconds"] == 10
+
+
+async def test_concurrent_401s_refresh_the_token_once():
+    import asyncio
+
+    import httpx
+
+    from app.threecx import ThreeCXClient
+
+    issued = []  # like this PBX: a new token cancels the previous one
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/connect/token":
+            issued.append(f"t{len(issued) + 1}")
+            return httpx.Response(200, json={"access_token": issued[-1], "expires_in": 3600})
+        await asyncio.sleep(0.01)
+        if request.headers["Authorization"] != f"Bearer {issued[-1]}":
+            return httpx.Response(401)
+        return httpx.Response(200, json={"value": []})
+
+    client = ThreeCXClient("https://pbx.example", "id", "secret", transport=httpx.MockTransport(handler))
+    await client.get("/xapi/v1/Users")
+    issued.append("t-other")  # another program logged in with the same API client
+    await asyncio.gather(client.get("/xapi/v1/Users"), client.get("/xapi/v1/ActiveCalls"))
+    assert issued == ["t1", "t-other", "t3"]
+    await client.close()
