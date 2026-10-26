@@ -158,3 +158,28 @@ async def test_client_adapts_to_3cx_top_limit_and_keeps_queue_status():
     await client.list_users()
     assert len(selects) == 1 + 3 + 3  # one refused request, then 100-row pages only
     await client.close()
+
+
+def test_call_log_counts_fallback():
+    from app.stats import call_log_counts
+
+    day = date(2026, 10, 26)
+    rows = [
+        # queue call: 103 rang without answering, 107 answered
+        {"CallId": "1", "SegmentId": 1, "Indent": 0, "SourceDn": "+855", "DestinationDn": "107", "ActionDnDn": "800",
+         "Answered": True},
+        {"CallId": "1", "SegmentId": 2, "Indent": 1, "SourceDn": "800", "DestinationDn": "103", "Answered": False},
+        {"CallId": "1", "SegmentId": 3, "Indent": 1, "SourceDn": "800", "DestinationDn": "107", "Answered": True,
+         "TalkingDuration": "PT2M"},
+        # abandoned in queue
+        {"CallId": "2", "SegmentId": 4, "Indent": 0, "SourceDn": "+855", "DestinationDn": "800", "Answered": False},
+        # outbound call by 103, and an internal call 103 -> 107 that is neither
+        {"CallId": "3", "SegmentId": 5, "Indent": 0, "SourceDn": "103", "DestinationDn": "+85512", "Answered": True,
+         "TalkingDuration": "PT30S"},
+        {"CallId": "4", "SegmentId": 6, "Indent": 0, "SourceDn": "103", "DestinationDn": "107", "Answered": True},
+    ]
+    agents, queues = call_log_counts([parse_call_record(r, day) for r in rows], {"103", "107"}, ["800"])
+    assert (agents["107"]["inbound"], agents["107"]["missed"], agents["107"]["talk_seconds"]) == (1, 0, 120)
+    assert (agents["103"]["inbound"], agents["103"]["missed"], agents["103"]["outbound"]) == (0, 1, 1)
+    assert agents["103"]["talk_seconds"] == 30
+    assert queues["800"] == {"name": "", "received": 2, "answered": 1, "missed": 1}

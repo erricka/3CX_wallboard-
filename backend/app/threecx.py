@@ -84,7 +84,7 @@ class ThreeCXClient:
             self._token_expiry = time.monotonic() + max(expires_in - 10, 30)
             return self._token
 
-    async def get(self, path: str, params: dict | None = None) -> dict:
+    async def _request(self, path: str, params: dict | None = None) -> httpx.Response:
         for attempt in range(2):
             token = await self._get_token(force=attempt > 0)
             try:
@@ -95,8 +95,15 @@ class ThreeCXClient:
                 continue
             if resp.status_code >= 400:
                 raise ThreeCXError(f"GET {path} -> {resp.status_code}: {resp.text[:300]}", resp.status_code)
-            return resp.json()
+            return resp
         raise ThreeCXError("3CX rejected the access token", 401)
+
+    async def get(self, path: str, params: dict | None = None) -> dict:
+        return (await self._request(path, params)).json()
+
+    async def swagger(self) -> str:
+        """The PBX's own API description, listing every function and its arguments."""
+        return (await self._request(f"{API}/swagger.yaml")).text
 
     async def get_all(self, path: str, params: dict | None = None, page_size: int = 1000) -> list[dict]:
         endpoint = path.split("(")[0]

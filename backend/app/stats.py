@@ -109,11 +109,8 @@ def slow_answer_counts(records: list[dict], extensions: set[str], threshold: flo
     used when present so that queue waiting time is not counted as agent ringing time.
     Each agent is counted at most once per call.
     """
-    by_call: dict[str, list[dict]] = defaultdict(list)
-    for r in records:
-        by_call[r["call_id"] or f"segment-{r['segment_id']}"].append(r)
     counts: Counter = Counter()
-    for rows in by_call.values():
+    for rows in _calls(records):
         legs = [r for r in rows if r["indent"] > 0] or rows
         counts.update({
             r["destination_dn"] for r in legs
@@ -122,6 +119,47 @@ def slow_answer_counts(records: list[dict], extensions: set[str], threshold: flo
             and r["ringing_seconds"] > threshold
         })
     return counts
+
+
+def _calls(records: list[dict]) -> list[list[dict]]:
+    by_call: dict[str, list[dict]] = defaultdict(list)
+    for r in records:
+        by_call[r["call_id"] or f"segment-{r['segment_id']}"].append(r)
+    return list(by_call.values())
+
+
+def call_log_counts(records: list[dict], agent_exts: set[str],
+                    queue_numbers: list[str]) -> tuple[dict[str, dict], dict[str, dict]]:
+    """Agent and queue counts worked out from the call log.
+
+    Used when this PBX's ReportExtensionStatistics / ReportQueuePerformanceTotals
+    functions fail. Per call: an agent whose leg was answered gets an inbound call,
+    an agent who was rung but did not answer gets a missed call, and a call placed by
+    an agent to a number that is neither an agent nor a queue is an outbound call.
+    """
+    agents: dict[str, dict] = {}
+    queues = {q: {"name": "", "received": 0, "answered": 0} for q in queue_numbers}
+    for rows in _calls(records):
+        main = next((r for r in rows if r["indent"] == 0), rows[0])
+        legs = [r for r in rows if r["indent"] > 0] or rows
+        answered_by = {r["destination_dn"] for r in legs if r["answered"] and r["destination_dn"] in agent_exts}
+        rung = {r["destination_dn"] for r in legs
+                if r["destination_dn"] in agent_exts and r["source_dn"] not in agent_exts}
+        for ext in rung:
+            agents.setdefault(ext, empty_agent())["inbound" if ext in answered_by else "missed"] += 1
+        caller, callee = main["source_dn"], main["destination_dn"]
+        if caller in agent_exts and callee not in agent_exts and callee not in queues:
+            agents.setdefault(caller, empty_agent())["outbound"] += 1
+        for r in legs:
+            if r["answered"]:
+                for ext in {r["source_dn"], r["destination_dn"]} & agent_exts:
+                    agents.setdefault(ext, empty_agent())["talk_seconds"] += r["talking_seconds"]
+        for q in {r[k] for r in rows for k in ("source_dn", "destination_dn", "action_dn")} & set(queues):
+            queues[q]["received"] += 1
+            queues[q]["answered"] += bool(answered_by)
+    for q in queues.values():
+        q["missed"] = max(q["received"] - q["answered"], 0)
+    return agents, queues
 
 
 def parse_sessions(rows: list[dict]) -> list[tuple[str, str, datetime, datetime | None]]:
@@ -161,26 +199,38 @@ async def status_log_sessions(session: AsyncSession, start: datetime, end: datet
 
 
 async def sync_day(client: ThreeCXClient, sessionmaker: async_sessionmaker, settings: Settings, day: date,
-                   queue_numbers: list[str], now: datetime | None = None) -> DayStats:
+                   queue_numbers: list[str], agent_exts: set[str], now: datetime | None = None) -> DayStats:
     """Fetch one local day from 3CX and replace that day's rows in Postgres."""
     now = now or utcnow()
     start, end = day_bounds_utc(day, settings.tz)
-    ext_rows, queue_rows, log_rows = await asyncio.gather(
-        client.extension_statistics(start, end),
-        client.queue_performance_totals(start, end, queue_numbers),
-        client.call_log(start, end),
-    )
-    try:
-        login_rows = await client.agent_login_history(start, end, settings.timezone, queue_numbers)
-    except ThreeCXError as exc:
-        log.warning("Agent login history unavailable for %s, using wallboard status log: %s", day, exc)
-        login_rows = None
+    sources = {
+        "extension statistics": client.extension_statistics(start, end),
+        "queue performance": client.queue_performance_totals(start, end, queue_numbers),
+        "call log": client.call_log(start, end),
+        "agent login history": client.agent_login_history(start, end, settings.timezone, queue_numbers),
+    }
+    fetched = dict(zip(sources, await asyncio.gather(*sources.values(), return_exceptions=True)))
+    problems = []
+    for name, result in fetched.items():
+        if isinstance(result, ThreeCXError):
+            problems.append(f"{name}: {result}")
+            fetched[name] = None
+        elif isinstance(result, BaseException):
+            raise result
+    ext_rows, queue_rows, log_rows, login_rows = fetched.values()
+    if log_rows is None and (ext_rows is None or queue_rows is None):
+        raise ThreeCXError("; ".join(problems))
+    if problems:
+        log.warning("3CX report problems for %s (falling back to the call log / status log): %s",
+                    day, "; ".join(problems))
 
-    agents = extension_counts(ext_rows)
-    queues = queue_counts(queue_rows)
-    records = [parse_call_record(r, day) for r in log_rows]
-    for ext, count in slow_answer_counts(records, set(agents), settings.slow_answer_seconds).items():
-        agents[ext]["unanswered_slow"] = count
+    records = [parse_call_record(r, day) for r in log_rows or []]
+    derived_agents, derived_queues = call_log_counts(records, agent_exts, queue_numbers)
+    agents = extension_counts(ext_rows) if ext_rows is not None else derived_agents
+    queues = queue_counts(queue_rows) if queue_rows is not None else derived_queues
+    slow = slow_answer_counts(records, agent_exts | set(agents), settings.slow_answer_seconds)
+    for ext, count in slow.items():
+        agents.setdefault(ext, empty_agent())["unanswered_slow"] = count
 
     async with sessionmaker() as session, session.begin():
         if login_rows is not None:
@@ -204,7 +254,8 @@ async def sync_day(client: ThreeCXClient, sessionmaker: async_sessionmaker, sett
                 {"day": day, "extension": e, "queue": q, "logged_in_at": s, "logged_out_at": o}
                 for e, q, s, o in sessions
             ])
-        complete = login_rows is not None and now >= end + COMPLETE_GRACE
+        # Counts derived from a complete call log are final too, so only those two sources matter.
+        complete = log_rows is not None and login_rows is not None and now >= end + COMPLETE_GRACE
         stmt = pg_insert(SyncedDay).values(day=day, synced_at=now, complete=complete)
         await session.execute(stmt.on_conflict_do_update(
             index_elements=[SyncedDay.day], set_={"synced_at": now, "complete": complete}))

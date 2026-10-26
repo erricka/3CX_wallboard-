@@ -37,6 +37,8 @@ async def main() -> int:
             print(f"OK    {r['check']}: {r['rows']} rows  fields={r['fields']}")
         else:
             print(f"FAIL  {r['check']}: {r['error']}")
+            if r.get("pbx_definition"):
+                print(f"      PBX definition:\n{r['pbx_definition']}")
     print(f"\nSamples saved in {OUT.resolve()}")
     return 0 if all(r["ok"] for r in results) else 1
 

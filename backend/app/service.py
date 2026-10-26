@@ -92,6 +92,11 @@ class WallboardService:
         numbers = [str(q["Number"]) for q in self._queues if q.get("Number")]
         return [n for n in numbers if not wanted or n in wanted] or wanted
 
+    def agent_numbers(self) -> set[str]:
+        wanted = set(self.queue_numbers())
+        return {str(a["Number"]) for q in self._queues if str(q.get("Number")) in wanted
+                for a in q.get("Agents") or [] if a.get("Number")}
+
     async def _poll_loop(self) -> None:
         interval = self.settings.poll_interval_seconds
         while True:
@@ -199,7 +204,8 @@ class WallboardService:
 
     async def sync(self, day: date) -> DayStats:
         async with self._day_locks[day]:
-            stats = await sync_day(self.client, self.sessionmaker, self.settings, day, self.queue_numbers())
+            stats = await sync_day(self.client, self.sessionmaker, self.settings, day, self.queue_numbers(),
+                                   self.agent_numbers())
         if day == local_today(self.settings.tz):
             self._today = stats
         return stats
