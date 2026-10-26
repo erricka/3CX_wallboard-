@@ -8,11 +8,7 @@ cd "$(dirname "$0")/.."
 # "apt-get update" reports an error even though the other sources (where PostgreSQL comes from) updated.
 sudo apt-get update -qq || echo "Some package sources could not be updated (ignored); installing PostgreSQL anyway..."
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql > /dev/null
-sudo service postgresql start
-sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'wallboard'" | grep -q 1 \
-  || sudo -u postgres psql -qc "CREATE USER wallboard PASSWORD 'wallboard'"
-sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'wallboard'" | grep -q 1 \
-  || sudo -u postgres createdb -E UTF8 -T template0 -O wallboard wallboard
+bash .devcontainer/ensure-db.sh
 
 pip install --user -r backend/requirements.txt
 (cd frontend && npm ci --no-audit --no-fund && npm run build)

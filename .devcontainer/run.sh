@@ -9,7 +9,7 @@ if ! command -v pg_ctlcluster >/dev/null 2>&1; then
   echo "PostgreSQL is not installed in this codespace yet; running the one-time setup (a few minutes)..."
   bash .devcontainer/setup.sh
 fi
-pg_isready -q -h 127.0.0.1 2>/dev/null || sudo service postgresql start
+bash .devcontainer/ensure-db.sh
 export DATABASE_URL=postgresql+asyncpg://wallboard:wallboard@127.0.0.1:5432/wallboard
 
 python -c "import uvicorn, fastapi, asyncpg" 2>/dev/null || pip install --user -r backend/requirements.txt
