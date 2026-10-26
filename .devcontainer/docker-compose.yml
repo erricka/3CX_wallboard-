@@ -1,0 +1,24 @@
+# Codespaces / dev container: the app container plus a PostgreSQL database.
+services:
+  dev:
+    image: mcr.microsoft.com/devcontainers/python:1-3.12-bookworm
+    command: sleep infinity
+    volumes:
+      - ../..:/workspaces:cached
+    environment:
+      DATABASE_URL: postgresql+asyncpg://wallboard:wallboard@db:5432/wallboard
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wallboard
+      POSTGRES_USER: wallboard
+      POSTGRES_PASSWORD: wallboard
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

@@ -63,7 +63,22 @@ If anything fails, the error message names the endpoint and the HTTP status.
 
 ## 4. Host it
 
-### Option A: Render (free, gives you a public URL)
+GitHub Pages cannot run this app: Pages serves static files only, and the wallboard needs the Python backend and PostgreSQL.
+
+### Option A: GitHub Codespaces (runs on GitHub, good for trying it out)
+
+1. Give the codespace the API key, either way:
+   - GitHub → **Settings → Codespaces → New secret**: name `THREECX_CLIENT_SECRET`, value = API key, repository = this repo, or
+   - a `.env` file in the repo root (only in a **private** repo).
+2. Repo page → **Code → Codespaces → Create codespace on main**.
+3. The first start takes a few minutes. It installs everything, builds the React app, starts PostgreSQL and the wallboard.
+4. Open the **Ports** tab and click the globe icon next to port **8000** (*Wallboard*).
+   The port is private to your GitHub login. To share it: right-click → **Port visibility → Public**.
+
+Server log: `cat /tmp/wallboard.log`. Restart: `bash .devcontainer/run.sh`.
+A codespace stops after 30 minutes without activity (configurable in GitHub settings), and the wallboard stops with it.
+
+### Option B: Render (free, always-on URL)
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/erricka/3cx_wallboard-)
 
@@ -76,7 +91,7 @@ If anything fails, the error message names the endpoint and the HTTP status.
 On the free plan, the service sleeps after 15 minutes with no visitors, and the database expires after 30 days.
 For a wallboard on a TV all day, use the Starter plan (a few dollars a month) or option B.
 
-### Option B: Docker on your own server or PC
+### Option C: Docker on your own server or PC
 
 On any machine that can reach `maxbit.3cx.asia`:
 
