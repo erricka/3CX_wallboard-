@@ -3,13 +3,16 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-Period = Literal["today", "yesterday", "7days", "1month"]
+Period = Literal["today", "yesterday", "7days", "1month", "range"]
 PERIODS = {
     "today": "Today",
     "yesterday": "Yesterday",
     "7days": "Last 7 days",
     "1month": "Last 1 month",
+    "range": "Date Range",  # custom start and end date
 }
+# Longest custom date range; every day not stored yet is fetched from 3CX first.
+MAX_RANGE_DAYS = 366
 
 
 def utcnow() -> datetime:
@@ -38,9 +41,25 @@ def period_days(period: str, tz: ZoneInfo, now: datetime | None = None) -> list[
         count = 7
     elif period == "1month":
         count = 30
+    elif period == "range":
+        raise ValueError("A date range needs a start and an end date; use range_days()")
     else:
         raise ValueError(f"Unknown period {period!r}; expected one of {', '.join(PERIODS)}")
     return [today - timedelta(days=i) for i in range(count - 1, -1, -1)]
+
+
+def range_days(start: date | None, end: date | None, tz: ZoneInfo, now: datetime | None = None) -> list[date]:
+    """Local calendar days from start to end, both included. Raises ValueError with a message for the user."""
+    if start is None or end is None:
+        raise ValueError("Choose a start date and an end date for the date range.")
+    if start > end:
+        raise ValueError("The start date must be on or before the end date.")
+    if end > local_today(tz, now):
+        raise ValueError("The end date cannot be in the future.")
+    count = (end - start).days + 1
+    if count > MAX_RANGE_DAYS:
+        raise ValueError(f"A date range can cover at most {MAX_RANGE_DAYS} days.")
+    return [start + timedelta(days=i) for i in range(count)]
 
 
 def merged_seconds(

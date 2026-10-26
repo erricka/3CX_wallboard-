@@ -123,7 +123,9 @@ Tests: `cd backend && pytest`
 ## Reports
 
 The **Download report** button on the wallboard, or
-`GET /api/reports/daily?period=today|yesterday|7days|1month&format=xlsx|csv`.
+`GET /api/reports/daily?period=today|yesterday|7days|1month&format=xlsx|csv`,
+or a custom **Date Range**: `period=range&start=2026-06-01&end=2026-10-10` (up to 366 days).
+Days not stored yet are fetched from 3CX first, so a long range can take a minute the first time.
 
 The Excel workbook has four sheets:
 

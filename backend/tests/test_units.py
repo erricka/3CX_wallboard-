@@ -252,3 +252,41 @@ async def test_concurrent_401s_refresh_the_token_once():
     await asyncio.gather(client.get("/xapi/v1/Users"), client.get("/xapi/v1/ActiveCalls"))
     assert issued == ["t1", "t-other", "t3"]
     await client.close()
+
+
+def test_range_days():
+    from app.timeutil import MAX_RANGE_DAYS, range_days
+
+    now = datetime(2026, 10, 26, 3, tzinfo=UTC)  # 10:00 in Phnom Penh
+    days = range_days(date(2026, 6, 1), date(2026, 10, 10), TZ, now)
+    assert days[0] == date(2026, 6, 1) and days[-1] == date(2026, 10, 10) and len(days) == 132
+    assert range_days(date(2026, 10, 26), date(2026, 10, 26), TZ, now) == [date(2026, 10, 26)]
+    for start, end, message in [
+        (None, date(2026, 10, 1), "start date and an end date"),
+        (date(2026, 10, 5), date(2026, 10, 1), "on or before the end date"),
+        (date(2026, 10, 1), date(2026, 10, 27), "cannot be in the future"),
+        (date(2025, 1, 1), date(2026, 10, 1), f"at most {MAX_RANGE_DAYS} days"),
+    ]:
+        with pytest.raises(ValueError, match=message):
+            range_days(start, end, TZ, now)
+
+
+def test_report_endpoint_rejects_bad_date_ranges():
+    from fastapi.testclient import TestClient
+
+    from app.config import Settings
+    from app.main import create_app
+
+    settings = Settings(threecx_client_id="", threecx_client_secret="",
+                        database_url="postgresql+asyncpg://x:y@127.0.0.1:9/none")
+    with TestClient(create_app(settings)) as client:
+        def detail(query):
+            res = client.get(f"/api/reports/daily?{query}")
+            return res.status_code, res.json()["detail"]
+
+        assert detail("period=range") == (400, "Choose a start date and an end date for the date range.")
+        assert detail("period=range&start=2026-10-10&end=2026-06-01") == (
+            400, "The start date must be on or before the end date.")
+        assert detail("period=range&start=2026-06-01&end=2999-01-01") == (400, "The end date cannot be in the future.")
+        assert detail("period=range&start=2026-06-01&end=2026-10-10")[0] == 503  # valid; database not up here
+        assert client.get("/api/reports/daily?period=range&start=june&end=2026-10-10").status_code == 422

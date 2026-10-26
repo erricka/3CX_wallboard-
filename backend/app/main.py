@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -14,7 +15,7 @@ from .diagnostics import run_checks
 from .reports import load_report, to_csv, to_xlsx
 from .service import WallboardService
 from .threecx import ThreeCXClient
-from .timeutil import PERIODS, Period, period_days, utcnow
+from .timeutil import PERIODS, Period, period_days, range_days, utcnow
 
 FORMATS = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -76,11 +77,16 @@ def create_app(settings: Settings | None = None, client: ThreeCXClient | None = 
         return [{"value": k, "label": v} for k, v in PERIODS.items()]
 
     @app.get("/api/reports/daily")
-    async def daily_report(request: Request, period: Period = "today", format: Literal["xlsx", "csv"] = "xlsx"):
+    async def daily_report(request: Request, period: Period = "today", format: Literal["xlsx", "csv"] = "xlsx",
+                           start: date | None = None, end: date | None = None):
+        """period=today|yesterday|7days|1month, or period=range&start=YYYY-MM-DD&end=YYYY-MM-DD."""
+        try:
+            days = range_days(start, end, settings.tz) if period == "range" else period_days(period, settings.tz)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
         service: WallboardService = request.app.state.service
         if not service.db_ready:
             raise HTTPException(503, "The PostgreSQL database is not ready yet")
-        days = period_days(period, settings.tz)
         warnings = await service.ensure_synced(days)
         async with service.sessionmaker() as session:
             data = await load_report(session, period, days, settings.tz, settings.queue_filter,

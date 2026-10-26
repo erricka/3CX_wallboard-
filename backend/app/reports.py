@@ -84,7 +84,8 @@ async def load_report(session: AsyncSession, period: str, days: list[date], tz: 
         by_call[rec.call_id or f"segment-{rec.segment_id}"].append(rec)
     for rows in by_call.values():
         if any({r.source_dn, r.destination_dn, r.action_dn} & involved for r in rows):
-            data.calls.extend(r for r in rows if r.indent == 0)
+            main = [r for r in rows if r.indent == 0]
+            data.calls.extend(main or rows)  # this PBX reports every row with Indent 1
     data.calls.sort(key=lambda r: (r.start_time or now, r.segment_id or 0))
     return data
 
