@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time codespace setup: PostgreSQL in this container, Python packages, React build.
-# THREECX_CLIENT_SECRET comes from a Codespaces secret or a .env file in the repo root.
+# Credentials come from .env in the repo root (or a Codespaces secret THREECX_CLIENT_SECRET).
 set -e
 cd "$(dirname "$0")/.."
 
