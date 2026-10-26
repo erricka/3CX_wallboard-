@@ -1,6 +1,6 @@
 # 3CX Real-time Wallboard
 
-Live call-center wallboard for 3CX v20 with downloadable daily reports.
+Real-time call-center wallboard for 3CX v20 with downloadable daily reports.
 
 - **Frontend:** React (Vite), built into the same Docker image and served by the backend
 - **Backend:** Python (FastAPI). Polls the 3CX XAPI and pushes updates over a WebSocket.

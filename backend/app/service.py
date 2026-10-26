@@ -105,7 +105,7 @@ class WallboardService:
                 await self.poll_once()
             except Exception as exc:  # keep polling through 3CX/network hiccups
                 log.warning("Wallboard poll failed: %s", exc)
-                self._publish_error(f"Cannot load live data from 3CX: {exc}")
+                self._publish_error(f"Cannot load data from 3CX: {exc}")
             await asyncio.sleep(max(interval - (time.monotonic() - started), 0.5))
 
     async def poll_once(self) -> None:
