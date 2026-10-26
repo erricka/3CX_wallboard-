@@ -1,6 +1,8 @@
 import { hoursMinutes } from '../format.js'
 
 const COUNTS = ['inbound', 'outbound', 'missed', 'unanswered_slow']
+// From this many agents on, rows get tighter so a team of up to 30 fits on one TV screen.
+const DENSE_FROM = 15
 
 export default function AgentTable({ agents, slowSeconds }) {
   const totals = Object.fromEntries(
@@ -9,7 +11,7 @@ export default function AgentTable({ agents, slowSeconds }) {
 
   return (
     <div className="table-wrap">
-      <table className="agents">
+      <table className={`agents${agents.length >= DENSE_FROM ? ' is-dense' : ''}`}>
         <thead>
           <tr>
             <th className="col-agent">Agent</th>
@@ -25,7 +27,7 @@ export default function AgentTable({ agents, slowSeconds }) {
           {agents.map((a) => (
             <tr key={a.extension} className={a.kind === 'logoff' ? 'is-off' : undefined}>
               <td className="col-agent">
-                <span className="agent-name">{a.name}</span>
+                <span className="agent-name" title={a.name}>{a.name}</span>
                 <span className="agent-ext">{a.extension}</span>
               </td>
               <td className="col-status">

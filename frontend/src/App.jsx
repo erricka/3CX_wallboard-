@@ -47,21 +47,23 @@ export default function App() {
 
         {snapshot ? (
           <>
-            <section aria-labelledby="queues-title">
-              <div className="section-head">
-                <h2 id="queues-title">Queues</h2>
-                <span className="section-meta">Today since 00:00</span>
-              </div>
-              <QueueCards queues={snapshot.queues} />
-            </section>
+            <div className="board">
+              <section className="board-queues" aria-labelledby="queues-title">
+                <div className="section-head">
+                  <h2 id="queues-title">Queues</h2>
+                  <span className="section-meta">Today since 00:00</span>
+                </div>
+                <QueueCards queues={snapshot.queues} />
+              </section>
 
-            <section aria-labelledby="agents-title">
-              <div className="section-head">
-                <h2 id="agents-title">Agents</h2>
-                <span className="section-meta">{loggedIn} of {agents.length} logged in</span>
-              </div>
-              <AgentTable agents={agents} slowSeconds={snapshot.slow_answer_seconds ?? 5} />
-            </section>
+              <section className="board-agents" aria-labelledby="agents-title">
+                <div className="section-head">
+                  <h2 id="agents-title">Agents</h2>
+                  <span className="section-meta">{loggedIn} of {agents.length} logged in</span>
+                </div>
+                <AgentTable agents={agents} slowSeconds={snapshot.slow_answer_seconds ?? 5} />
+              </section>
+            </div>
 
             <footer className="footnote">
               Status updates every 3 seconds · daily counters since 00:00 ({snapshot.timezone}), refreshed{' '}
