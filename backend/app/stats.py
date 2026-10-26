@@ -31,6 +31,8 @@ log = logging.getLogger(__name__)
 
 # Calls still finishing at midnight can land in the log a little later.
 COMPLETE_GRACE = timedelta(minutes=10)
+# Login history lists sessions by when they started; agents often stay logged in for days.
+LOGIN_LOOKBACK = timedelta(days=7)
 
 
 @dataclass
@@ -128,27 +130,40 @@ def _calls(records: list[dict]) -> list[list[dict]]:
     return list(by_call.values())
 
 
+def _direction(rows: list[dict]) -> str | None:
+    """Call direction from v20's call log ("Inbound", "Outbound", "Internal"), if the build reports it."""
+    for r in rows:
+        value = (r.get("raw") or {}).get("Direction")
+        if value:
+            return str(value).lower()
+    return None
+
+
 def call_log_counts(records: list[dict], agent_exts: set[str],
                     queue_numbers: list[str]) -> tuple[dict[str, dict], dict[str, dict]]:
     """Agent and queue counts worked out from the call log.
 
     Used when this PBX's ReportExtensionStatistics / ReportQueuePerformanceTotals
-    functions fail. Per call: an agent whose leg was answered gets an inbound call,
-    an agent who was rung but did not answer gets a missed call, and a call placed by
-    an agent to a number that is neither an agent nor a queue is an outbound call.
+    functions fail. For an inbound call, an agent whose leg was answered gets an inbound
+    call and an agent who was rung but did not answer gets a missed call; an outbound
+    call counts for the agent who placed it. Internal calls only add talk time. Builds
+    without a Direction field fall back to telling these apart by the numbers involved.
     """
     agents: dict[str, dict] = {}
     queues = {q: {"name": "", "received": 0, "answered": 0} for q in queue_numbers}
     for rows in _calls(records):
         main = next((r for r in rows if r["indent"] == 0), rows[0])
         legs = [r for r in rows if r["indent"] > 0] or rows
+        direction = _direction(rows)
         answered_by = {r["destination_dn"] for r in legs if r["answered"] and r["destination_dn"] in agent_exts}
-        rung = {r["destination_dn"] for r in legs
-                if r["destination_dn"] in agent_exts and r["source_dn"] not in agent_exts}
-        for ext in rung:
-            agents.setdefault(ext, empty_agent())["inbound" if ext in answered_by else "missed"] += 1
+        if direction in (None, "inbound"):
+            rung = {r["destination_dn"] for r in legs
+                    if r["destination_dn"] in agent_exts and r["source_dn"] not in agent_exts}
+            for ext in rung:
+                agents.setdefault(ext, empty_agent())["inbound" if ext in answered_by else "missed"] += 1
         caller, callee = main["source_dn"], main["destination_dn"]
-        if caller in agent_exts and callee not in agent_exts and callee not in queues:
+        placed = direction == "outbound" if direction else callee not in agent_exts and callee not in queues
+        if caller in agent_exts and placed:
             agents.setdefault(caller, empty_agent())["outbound"] += 1
         for r in legs:
             if r["answered"]:
@@ -205,9 +220,9 @@ async def sync_day(client: ThreeCXClient, sessionmaker: async_sessionmaker, sett
     start, end = day_bounds_utc(day, settings.tz)
     sources = {
         "extension statistics": client.extension_statistics(start, end),
-        "queue performance": client.queue_performance_totals(start, end, queue_numbers),
+        "queue performance": client.queue_performance_totals(start, end),
         "call log": client.call_log(start, end),
-        "agent login history": client.agent_login_history(start, end, settings.timezone, queue_numbers),
+        "agent login history": client.agent_login_history(start - LOGIN_LOOKBACK, end, settings.timezone),
     }
     fetched = dict(zip(sources, await asyncio.gather(*sources.values(), return_exceptions=True)))
     problems = []
@@ -227,14 +242,17 @@ async def sync_day(client: ThreeCXClient, sessionmaker: async_sessionmaker, sett
     records = [parse_call_record(r, day) for r in log_rows or []]
     derived_agents, derived_queues = call_log_counts(records, agent_exts, queue_numbers)
     agents = extension_counts(ext_rows) if ext_rows is not None else derived_agents
-    queues = queue_counts(queue_rows) if queue_rows is not None else derived_queues
+    if queue_rows is not None:
+        queues = {q: v for q, v in queue_counts(queue_rows).items() if not queue_numbers or q in queue_numbers}
+    else:
+        queues = derived_queues
     slow = slow_answer_counts(records, agent_exts | set(agents), settings.slow_answer_seconds)
     for ext, count in slow.items():
         agents.setdefault(ext, empty_agent())["unanswered_slow"] = count
 
     async with sessionmaker() as session, session.begin():
         if login_rows is not None:
-            sessions = parse_sessions(login_rows)
+            sessions = [x for x in parse_sessions(login_rows) if not x[1] or not queue_numbers or x[1] in queue_numbers]
         else:
             sessions = await status_log_sessions(session, start, end)
         work, open_now = work_seconds(sessions, start, end, now)

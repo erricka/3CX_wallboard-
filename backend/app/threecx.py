@@ -154,7 +154,7 @@ class ThreeCXClient:
 
     async def extension_statistics(self, start: datetime, end: datetime) -> list[dict]:
         if self._ext_stats_args is False:
-            raise ThreeCXError("ReportExtensionStatistics returns 500 on this PBX for every argument variant", 500)
+            raise ThreeCXError("ReportExtensionStatistics rejects every argument variant on this PBX", 500)
         variants = [self._ext_stats_args] if self._ext_stats_args else EXTENSION_STATS_VARIANTS
         error = None
         for extension_filter, call_area in variants:
@@ -162,7 +162,7 @@ class ThreeCXClient:
             try:
                 rows = await self.get_all(f"{API}/ReportExtensionStatistics/Pbx.GetExtensionStatisticsData({args})")
             except ThreeCXError as exc:
-                if exc.status != 500:
+                if exc.status not in (400, 500):
                     raise
                 error = exc
                 continue
@@ -175,14 +175,15 @@ class ThreeCXClient:
             self._ext_stats_args = False
         raise error
 
-    async def queue_performance_totals(self, start: datetime, end: datetime, queue_dns: list[str]) -> list[dict]:
-        args = odata_args(periodFrom=start, periodTo=end, queueDns=",".join(queue_dns), waitInterval="0:00:00")
+    # Queue reports: an empty queue filter returns every queue; a comma list returns nothing on
+    # v20, so callers filter the rows by queue number themselves.
+
+    async def queue_performance_totals(self, start: datetime, end: datetime) -> list[dict]:
+        args = odata_args(periodFrom=start, periodTo=end, queueDns="", waitInterval="0:00:00")
         return await self.get_all(f"{API}/ReportQueuePerformanceTotals/Pbx.GetQueuePerformanceTotalsData({args})")
 
-    async def agent_login_history(self, start: datetime, end: datetime, tz_name: str,
-                                  queue_dns: list[str]) -> list[dict]:
-        args = odata_args(clientTimeZone=tz_name, startDt=start, endDt=end,
-                          queueDnStr=",".join(queue_dns), agentDnStr="")
+    async def agent_login_history(self, start: datetime, end: datetime, tz_name: str) -> list[dict]:
+        args = odata_args(clientTimeZone=tz_name, startDt=start, endDt=end, queueDnStr="", agentDnStr="")
         return await self.get_all(f"{API}/ReportAgentLoginHistory/Pbx.GetAgentLoginHistoryData({args})")
 
     async def call_log(self, start: datetime, end: datetime) -> list[dict]:

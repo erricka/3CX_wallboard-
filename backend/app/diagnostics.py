@@ -44,15 +44,12 @@ async def run_checks(client: ThreeCXClient, settings: Settings) -> tuple[list[di
         samples[name] = rows
         return rows
 
-    queues = await check("queues", client.list_queues)
+    await check("queues", client.list_queues)
     await check("users", client.list_users)
     await check("active_calls", client.active_calls)
-    queue_dns = [str(q["Number"]) for q in queues
-                 if not settings.queue_filter or str(q["Number"]) in settings.queue_filter]
     await check("extension_statistics", lambda: client.extension_statistics(start, end))
-    await check("queue_performance_totals", lambda: client.queue_performance_totals(start, end, queue_dns))
-    await check("agent_login_history",
-                lambda: client.agent_login_history(start, end, settings.timezone, queue_dns))
+    await check("queue_performance_totals", lambda: client.queue_performance_totals(start, end))
+    await check("agent_login_history", lambda: client.agent_login_history(start, end, settings.timezone))
     await check("call_log", lambda: client.call_log(start, end))
 
     failed = [r for r in results if not r["ok"] and r["check"] in FUNCTIONS]

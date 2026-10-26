@@ -17,7 +17,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.diagnostics import run_checks
-from app.threecx import API, EXTENSION_STATS_VARIANTS, ThreeCXClient, ThreeCXError, odata_args
+from app.threecx import API, ThreeCXClient, ThreeCXError, odata_args
 from app.timeutil import day_bounds_utc, local_today
 
 OUT = Path("probe-output")
@@ -47,36 +47,42 @@ async def main() -> int:
 
 async def experiments(client: ThreeCXClient, settings, queues: list[dict]) -> None:
     today = local_today(settings.tz)
-    start, end = day_bounds_utc(today, settings.tz)
+    end = day_bounds_utc(today, settings.tz)[1]
     week_start = day_bounds_utc(today - timedelta(days=6), settings.tz)[0]
-    numbers = [str(q["Number"]) for q in queues]
+    agents = sorted({str(a["Number"]) for q in queues for a in q.get("Agents") or [] if a.get("Number")})
 
     async def count(path: str) -> str:
         try:
             return f"{len(await client.get_all(path))} rows"
         except ThreeCXError as exc:
-            return f"error {exc.status}"
+            return f"error {exc.status}: {str(exc).split(': ', 1)[-1][:120]}"
 
     print("\nQueues:")
     for q in queues:
-        print(f"  {q['Number']} {q.get('Name')}: {len(q.get('Agents') or [])} agents")
+        members = ", ".join(str(a.get("Number")) for a in q.get("Agents") or [])
+        print(f"  {q['Number']} {q.get('Name')}: agents {members}")
 
-    variants = [("comma list", ",".join(numbers)), ("empty", "")] + [(n, n) for n in numbers]
-    print("\nQueue performance totals, last 7 days, by queueDns:")
-    for label, dns in variants:
-        args = odata_args(periodFrom=week_start, periodTo=end, queueDns=dns, waitInterval="0:00:00")
-        print(f"  {label:>12}: {await count(f'{API}/ReportQueuePerformanceTotals/Pbx.GetQueuePerformanceTotalsData({args})')}")
+    dates = odata_args(periodFrom=week_start, periodTo=end)
+    fn = f"{API}/ReportExtensionStatistics/Pbx.GetExtensionStatisticsData"
+    candidates = [(f"'{agents[0]}'" if agents else None, "one agent"),
+                  (odata_args(x=",".join(agents)).split("=", 1)[1], "comma list (encoded)"),
+                  ("'" + ",".join(agents) + "'", "comma list (plain)"),
+                  ("'*'", "*"), ("'all'", "all")]
+    print("\nExtension statistics, last 7 days, by extensionFilter (callArea=0):")
+    for value, label in candidates:
+        if value:
+            print(f"  {label:>22}: {await count(f'{fn}({dates},extensionFilter={value},callArea=0)')}")
 
-    print("\nAgent login history, last 7 days, by queueDnStr:")
-    for label, dns in variants:
-        args = odata_args(clientTimeZone=settings.timezone, startDt=week_start, endDt=end, queueDnStr=dns, agentDnStr="")
-        print(f"  {label:>12}: {await count(f'{API}/ReportAgentLoginHistory/Pbx.GetAgentLoginHistoryData({args})')}")
-
-    print("\nExtension statistics, today, by (extensionFilter, callArea):")
-    for extension_filter, call_area in EXTENSION_STATS_VARIANTS:
-        args = odata_args(periodFrom=start, periodTo=end, extensionFilter=extension_filter, callArea=call_area)
-        label = f"({extension_filter!r}, {call_area})"
-        print(f"  {label:>12}: {await count(f'{API}/ReportExtensionStatistics/Pbx.GetExtensionStatisticsData({args})')}")
+    print("\nAgent login history, last 7 / 30 days (all queues):")
+    for days in (7, 30):
+        since = day_bounds_utc(today - timedelta(days=days - 1), settings.tz)[0]
+        try:
+            rows = await client.agent_login_history(since, end, settings.timezone)
+        except ThreeCXError as exc:
+            print(f"  {days:>2} days: error {exc.status}")
+            continue
+        open_rows = sum(1 for r in rows if not r.get("LoggedOutDt"))
+        print(f"  {days:>2} days: {len(rows)} sessions, {open_rows} still open, agents {sorted({str(r.get('AgentNo')) for r in rows})}")
 
     print("\nCall log, last 7 days:")
     try:
@@ -85,8 +91,10 @@ async def experiments(client: ThreeCXClient, settings, queues: list[dict]) -> No
         print(f"  error: {exc}")
         return
     print(f"  {len(rows)} rows")
-    for name in ("Direction", "Status", "CallType", "ActionType", "SourceType", "DestinationType", "Indent"):
+    for name in ("Direction", "Status", "CallType", "Indent"):
         print(f"  {name}: {dict(Counter(str(r.get(name)) for r in rows).most_common(8))}")
+    involved = Counter(str(r.get(k)) for r in rows for k in ("SourceDn", "DestinationDn") if str(r.get(k)) in agents)
+    print(f"  rows involving queue agents: {dict(involved)}")
 
 
 if __name__ == "__main__":

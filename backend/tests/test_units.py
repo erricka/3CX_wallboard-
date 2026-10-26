@@ -208,3 +208,21 @@ async def test_extension_statistics_finds_working_arguments():
     assert len(calls) == 4  # remembered: straight to the working arguments
     assert "extensionFilter=null" in odata_args(extensionFilter=None)
     await client.close()
+
+
+def test_call_log_counts_uses_direction_field():
+    from app.stats import call_log_counts
+
+    day = date(2026, 10, 26)
+    rows = [  # v20 builds: every row Indent 1, with Direction / Status
+        {"CallId": "1", "SegmentId": 1, "Indent": 1, "Direction": "Internal", "SourceDn": "1001", "DestinationDn": "1002",
+         "Answered": True, "TalkingDuration": "PT10S"},
+        {"CallId": "2", "SegmentId": 2, "Indent": 1, "Direction": "Inbound", "SourceDn": "+85512", "DestinationDn": "1002",
+         "Answered": False, "Status": "Unanswered"},
+        {"CallId": "3", "SegmentId": 3, "Indent": 1, "Direction": "Outbound", "SourceDn": "1001", "DestinationDn": "+85598",
+         "Answered": True, "TalkingDuration": "PT20S"},
+    ]
+    agents, _ = call_log_counts([parse_call_record(r, day) for r in rows], {"1001", "1002"}, ["9910"])
+    assert (agents["1001"]["inbound"], agents["1001"]["outbound"], agents["1001"]["missed"]) == (0, 1, 0)
+    assert (agents["1002"]["inbound"], agents["1002"]["outbound"], agents["1002"]["missed"]) == (0, 0, 1)
+    assert agents["1001"]["talk_seconds"] == 30 and agents["1002"]["talk_seconds"] == 10
