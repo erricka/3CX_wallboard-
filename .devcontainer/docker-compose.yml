@@ -5,8 +5,12 @@ services:
     command: sleep infinity
     volumes:
       - ../..:/workspaces:cached
+    # Share the database container's network: Codespaces only forwards ports
+    # (forwardPorts in devcontainer.json) set up this way; otherwise the
+    # browser gets HTTP 502. PostgreSQL is then reachable on localhost.
+    network_mode: service:db
     environment:
-      DATABASE_URL: postgresql+asyncpg://wallboard:wallboard@db:5432/wallboard
+      DATABASE_URL: postgresql+asyncpg://wallboard:wallboard@127.0.0.1:5432/wallboard
       THREECX_BASE_URL: https://maxbit.3cx.asia
       THREECX_CLIENT_ID: dashboardamk
       TIMEZONE: Asia/Phnom_Penh
