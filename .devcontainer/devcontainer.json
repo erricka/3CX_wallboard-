@@ -8,7 +8,8 @@
     "DATABASE_URL": "postgresql+asyncpg://wallboard:wallboard@127.0.0.1:5432/wallboard",
     "THREECX_BASE_URL": "https://maxbit.3cx.asia",
     "THREECX_CLIENT_ID": "dashboardamk",
-    "TIMEZONE": "Asia/Phnom_Penh"
+    "TIMEZONE": "Asia/Phnom_Penh",
+    "WALLBOARD_RING_GROUPS": "8001"
   },
   "forwardPorts": [8000],
   "portsAttributes": {

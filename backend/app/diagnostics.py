@@ -46,6 +46,7 @@ async def run_checks(client: ThreeCXClient, settings: Settings) -> tuple[list[di
 
     await check("queues", client.list_queues)
     await check("users", client.list_users)
+    await check("ring_groups", client.list_ring_groups)
     await check("active_calls", client.active_calls)
     await check("extension_statistics", lambda: client.extension_statistics(start, end))
     await check("queue_performance_totals", lambda: client.queue_performance_totals(start, end))

@@ -89,7 +89,7 @@ def create_app(settings: Settings | None = None, client: ThreeCXClient | None = 
             raise HTTPException(503, "The PostgreSQL database is not ready yet")
         warnings = await service.ensure_synced(days)
         async with service.sessionmaker() as session:
-            data = await load_report(session, period, days, settings.tz, settings.queue_filter,
+            data = await load_report(session, period, days, settings.tz, service.queue_numbers(),
                                      settings.slow_answer_seconds, utcnow())
         data.warnings = warnings
         body = to_xlsx(data) if format == "xlsx" else to_csv(data)

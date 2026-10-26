@@ -20,9 +20,12 @@ class Settings(BaseSettings):
     timezone: str = "Asia/Phnom_Penh"
     # Comma separated queue numbers to show, e.g. "800,801". Empty = all queues.
     wallboard_queues: str = ""
+    # Comma separated ring group numbers to show as well, e.g. "8001". Empty = none.
+    wallboard_ring_groups: str = ""
 
     poll_interval_seconds: float = 3
-    stats_refresh_seconds: float = 60
+    # How often today's answered/missed/work-time counters are re-read from 3CX.
+    stats_refresh_seconds: float = 20
     # "Unanswered within N sec" column threshold.
     slow_answer_seconds: int = 5
     # Days of history to pull into Postgres at startup so reports are instant.
@@ -48,6 +51,10 @@ class Settings(BaseSettings):
     @property
     def queue_filter(self) -> list[str]:
         return [q.strip() for q in self.wallboard_queues.split(",") if q.strip()]
+
+    @property
+    def ring_group_filter(self) -> list[str]:
+        return [g.strip() for g in self.wallboard_ring_groups.split(",") if g.strip()]
 
 
 @lru_cache

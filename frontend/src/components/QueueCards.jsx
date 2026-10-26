@@ -16,7 +16,10 @@ function QueueCard({ queue: q }) {
     <article className="queue-card">
       <header className="queue-head">
         <h3>{q.name}</h3>
-        <span className="queue-number">{q.number}</span>
+        <span className="queue-number">
+          {q.kind === 'ring_group' && <span className="queue-kind">Ring group</span>}
+          {q.number}
+        </span>
       </header>
       <dl className="queue-tiles">
         {TILES.map(([key, label, tone, format]) => (
@@ -32,8 +35,9 @@ function QueueCard({ queue: q }) {
 
 export default function QueueCards({ queues }) {
   if (queues.length === 0) return <p className="empty">No queues found on the PBX.</p>
+  // With three or more cards the tiles go four across, so every card still fits beside the agents.
   return (
-    <div className="queue-grid">
+    <div className={`queue-grid${queues.length >= 3 ? ' is-compact' : ''}`}>
       {queues.map((q) => <QueueCard key={q.number} queue={q} />)}
     </div>
   )

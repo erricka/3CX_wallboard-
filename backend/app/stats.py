@@ -34,7 +34,7 @@ COMPLETE_GRACE = timedelta(minutes=10)
 # Login history lists sessions by when they started; agents often stay logged in for days.
 LOGIN_LOOKBACK = timedelta(days=7)
 # Bump when the way daily stats are worked out changes: days stored by an older version are fetched again.
-STATS_VERSION = 2
+STATS_VERSION = 3
 
 
 @dataclass
@@ -144,8 +144,8 @@ def _direction(rows: list[dict]) -> str | None:
     return None
 
 
-def call_log_counts(records: list[dict], agent_exts: set[str],
-                    queue_numbers: list[str]) -> tuple[dict[str, dict], dict[str, dict]]:
+def call_log_counts(records: list[dict], agent_exts: set[str], queue_numbers: list[str],
+                    staff_exts: set[str] = frozenset()) -> tuple[dict[str, dict], dict[str, dict]]:
     """Agent and queue counts worked out from the call log.
 
     Used when this PBX's ReportExtensionStatistics / ReportQueuePerformanceTotals
@@ -153,7 +153,12 @@ def call_log_counts(records: list[dict], agent_exts: set[str],
     call and an agent who was rung but did not answer gets a missed call; an outbound
     call counts for the agent who placed it. Internal calls only add talk time. Builds
     without a Direction field fall back to telling these apart by the numbers involved.
+
+    queue_numbers may hold queues and ring groups: every call that touched one counts as
+    received there, and as answered when any extension of the PBX (staff_exts, or the
+    wallboard's agents) picked it up, e.g. a ring group call taken over by a colleague.
     """
+    staff = set(staff_exts) | agent_exts
     agents: dict[str, dict] = {}
     queues = {q: {"name": "", "received": 0, "answered": 0} for q in queue_numbers}
     for rows in _calls(records):
@@ -174,9 +179,10 @@ def call_log_counts(records: list[dict], agent_exts: set[str],
             if r["answered"]:
                 for ext in {r["source_dn"], r["destination_dn"]} & agent_exts:
                     agents.setdefault(ext, empty_agent())["talk_seconds"] += r["talking_seconds"]
+        picked_up = any(r["answered"] and r["destination_dn"] in staff for r in rows)
         for q in {r[k] for r in rows for k in ("source_dn", "destination_dn", "action_dn")} & set(queues):
             queues[q]["received"] += 1
-            queues[q]["answered"] += bool(answered_by)
+            queues[q]["answered"] += picked_up
     for q in queues.values():
         q["missed"] = max(q["received"] - q["answered"], 0)
     return agents, queues
@@ -219,8 +225,13 @@ async def status_log_sessions(session: AsyncSession, start: datetime, end: datet
 
 
 async def sync_day(client: ThreeCXClient, sessionmaker: async_sessionmaker, settings: Settings, day: date,
-                   queue_numbers: list[str], agent_exts: set[str], now: datetime | None = None) -> DayStats:
-    """Fetch one local day from 3CX and replace that day's rows in Postgres."""
+                   queue_numbers: list[str], agent_exts: set[str], now: datetime | None = None,
+                   staff_exts: set[str] = frozenset()) -> DayStats:
+    """Fetch one local day from 3CX and replace that day's rows in Postgres.
+
+    queue_numbers are the queues and ring groups on the wallboard, agent_exts their members,
+    staff_exts every extension on the PBX.
+    """
     now = now or utcnow()
     start, end = day_bounds_utc(day, settings.tz)
     sources = {
@@ -245,16 +256,16 @@ async def sync_day(client: ThreeCXClient, sessionmaker: async_sessionmaker, sett
                     day, "; ".join(problems))
 
     records = [parse_call_record(r, day) for r in log_rows or []]
-    derived_agents, derived_queues = call_log_counts(records, agent_exts, queue_numbers)
+    derived_agents, derived_queues = call_log_counts(records, agent_exts, queue_numbers, staff_exts)
     agents = extension_counts(ext_rows) if ext_rows is not None else derived_agents
-    # The queue report leaves out its count fields when a queue had no calls; count from the call log then.
+    # Ring groups (and queues the report leaves out) are counted from the call log; the queue
+    # report only covers queues and drops its count fields when a queue had no calls.
+    queues = derived_queues
+    names = {str(r.get("QueueDn")): r.get("QueueDisplayName") or "" for r in queue_rows or []}
+    for q, v in queues.items():
+        v["name"] = names.get(q, v["name"])
     if queue_rows and any("QueueReceivedCount" in r for r in queue_rows):
-        queues = {q: v for q, v in queue_counts(queue_rows).items() if not queue_numbers or q in queue_numbers}
-    else:
-        queues = derived_queues
-        names = {str(r.get("QueueDn")): r.get("QueueDisplayName") or "" for r in queue_rows or []}
-        for q, v in queues.items():
-            v["name"] = names.get(q, v["name"])
+        queues.update({q: v for q, v in queue_counts(queue_rows).items() if not queue_numbers or q in queue_numbers})
     slow = slow_answer_counts(records, agent_exts | set(agents), settings.slow_answer_seconds)
     for ext, count in slow.items():
         agents.setdefault(ext, empty_agent())["unanswered_slow"] = count
@@ -262,9 +273,13 @@ async def sync_day(client: ThreeCXClient, sessionmaker: async_sessionmaker, sett
     async with sessionmaker() as session, session.begin():
         if login_rows is not None:
             sessions = [x for x in parse_sessions(login_rows) if not x[1] or not queue_numbers or x[1] in queue_numbers]
+            # Ring group members have no queue login; use the time the wallboard saw them online.
+            with_login = {x[0] for x in sessions}
+            online = [x for x in await status_log_sessions(session, start, end)
+                      if x[0] in agent_exts and x[0] not in with_login]
         else:
-            sessions = await status_log_sessions(session, start, end)
-        work, open_now = work_seconds(sessions, start, end, now)
+            sessions, online = await status_log_sessions(session, start, end), []
+        work, open_now = work_seconds(sessions + online, start, end, now)
         for ext, seconds in work.items():
             agents.setdefault(ext, empty_agent())["work_seconds"] = seconds
 

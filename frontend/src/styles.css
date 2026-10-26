@@ -128,7 +128,11 @@ h1, h2, h3, p, dl, dd { margin: 0; }
 }
 .queue-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .queue-head h3 { font-size: 1.5rem; font-weight: 900; color: var(--amk-dark); }
-.queue-number { font-size: 1rem; font-weight: 700; color: var(--muted); }
+.queue-number { display: inline-flex; align-items: center; gap: 8px; font-size: 1rem; font-weight: 700; color: var(--muted); }
+.queue-kind {
+  font-size: 0.75rem; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--amk); background: var(--amk-tint); border: 1px solid var(--amk-line); border-radius: 999px; padding: 1px 8px;
+}
 
 .queue-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tile {
@@ -191,9 +195,9 @@ table.agents { width: 100%; border-collapse: collapse; font-variant-numeric: tab
 .pill-ringing .dot { animation: ring 1s ease-in-out infinite; }
 @keyframes ring { 50% { transform: scale(1.6); opacity: 0.55; } }
 
-/* ---- wide screens: queues left, agents right, everything on one screen ---- */
+/* ---- wide screens (1280 px and up): queues left, agents right, everything on one screen ---- */
 .board { display: flex; flex-direction: column; gap: 20px; }
-@media (min-width: 1100px) {
+@media (min-width: 1280px) {
   .board { display: grid; grid-template-columns: minmax(0, 9fr) minmax(0, 11fr); align-items: start; gap: 20px; }
   .board .queue-grid { grid-template-columns: 1fr; gap: 12px; }
   .board .queue-card { padding: 12px 16px 14px; gap: 10px; border-radius: 12px; }
@@ -204,6 +208,20 @@ table.agents { width: 100%; border-collapse: collapse; font-variant-numeric: tab
   .board .tile dt { font-size: clamp(0.75rem, 1.5vh, 0.95rem); }
   .board .tile dd { font-size: clamp(1.2rem, 3.3vh, 3rem); }
   .board .agents thead th { white-space: normal; line-height: 1.2; vertical-align: bottom; }
+  /* keep all seven columns inside the panel, Work time included */
+  .board .agents th, .board .agents td { padding-inline: 0.6rem; }
+  .board .agent-name { max-width: 11rem; }
+  .board .queue-grid.is-compact .queue-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .board .queue-grid.is-compact .tile dt { font-size: clamp(0.7rem, 1.35vh, 0.9rem); }
+}
+
+/* screens narrower than full HD (laptops, 1366-1600 px): narrower agent panel, so slimmer columns */
+@media (min-width: 1280px) and (max-width: 1919px) {
+  .board .agents th, .board .agents td { padding-inline: 0.4rem; }
+  .board .agents tbody td, .board .agents tfoot td { font-size: 1.1rem; }
+  .board .agents thead th { font-size: 0.68rem; letter-spacing: 0.04em; }
+  .board .agent-name { max-width: 8rem; }
+  .board .pill { min-width: 0; padding-inline: 0.55rem; font-size: 0.85rem; }
 }
 
 /* tighter agent rows for big teams (15+ agents); row height follows the screen height */

@@ -50,13 +50,16 @@ def call_states(calls: list[dict], agent_exts: set[str], queue_numbers: set[str]
     return agent_state, waiting
 
 
-def agent_status(user: dict, call_state: str | None) -> tuple[str, str]:
-    """(label, kind) where kind drives the colour: ready, talking, ringing, away, logoff."""
+def agent_status(user: dict, call_state: str | None, queue_login: bool = True) -> tuple[str, str]:
+    """(label, kind) where kind drives the colour: ready, talking, ringing, away, logoff.
+
+    queue_login=False for ring group members: ring groups have no login, only the phone counts.
+    """
     if call_state == "ringing":
         return "Ringing", "ringing"
     if call_state == "talking":
         return "Talking", "talking"
-    if not is_logged_in(user):
+    if queue_login and not is_logged_in(user):
         return "Logoff", "logoff"
     if user.get("IsRegistered") is False:
         return "Offline", "logoff"
@@ -81,6 +84,8 @@ def build_snapshot(users: list[dict], queues: list[dict], calls: list[dict], day
                 members[str(q["Number"])].add(ext)
                 agent_names.setdefault(ext, a.get("Name") or "")
     agent_exts = set().union(*members.values()) if members else set(users_by_ext)
+    in_queue = set().union(set(), *(members[str(q["Number"])] for q in shown if q.get("kind", "queue") == "queue"))
+    online = {ext for ext in agent_exts if users_by_ext.get(ext, {}).get("IsRegistered") is not False}
 
     states, waiting = call_states(calls, agent_exts, set(members), now)
     stats_agents = day_stats.agents if day_stats else {}
@@ -88,8 +93,9 @@ def build_snapshot(users: list[dict], queues: list[dict], calls: list[dict], day
     agents = []
     for ext in agent_exts:
         user = users_by_ext.get(ext, {})
-        status, kind = agent_status(user, states.get(ext))
-        logged_in = is_logged_in(user) and user.get("IsRegistered") is not False
+        queue_login = ext in in_queue or not members
+        status, kind = agent_status(user, states.get(ext), queue_login)
+        logged_in = ext in online and (is_logged_in(user) or not queue_login)
         s = stats_agents.get(ext) or empty_agent()
         work = s["work_seconds"]
         if day_stats and ext in day_stats.open_sessions and logged_in:
@@ -112,12 +118,16 @@ def build_snapshot(users: list[dict], queues: list[dict], calls: list[dict], day
     queue_rows = []
     for q in shown:
         number = str(q["Number"])
-        team = [a for a in agents if a["extension"] in members[number] and a["logged_in"]]
+        kind = q.get("kind", "queue")
+        # queue: agents logged in to the queues; ring group: members whose phone is online
+        team = [a for a in agents if a["extension"] in members[number]
+                and (a["logged_in"] if kind == "queue" else a["extension"] in online)]
         waits = waiting.get(number, [])
         qs = (day_stats.queues.get(number) if day_stats else None) or {}
         queue_rows.append({
             "number": number,
             "name": q.get("Name") or number,
+            "kind": kind,
             "agents_in_work": len(team),
             "agents_free": sum(a["kind"] == "ready" for a in team),
             "agents_talk": sum(a["kind"] == "talking" for a in team),

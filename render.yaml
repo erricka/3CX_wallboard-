@@ -30,3 +30,5 @@ services:
         value: Asia/Phnom_Penh
       - key: WALLBOARD_QUEUES
         value: ""
+      - key: WALLBOARD_RING_GROUPS
+        value: "8001"

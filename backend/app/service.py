@@ -89,14 +89,29 @@ class WallboardService:
     # ---- live polling -----------------------------------------------------------
 
     def queue_numbers(self) -> list[str]:
-        wanted = self.settings.queue_filter
-        numbers = [str(q["Number"]) for q in self._queues if q.get("Number")]
-        return [n for n in numbers if not wanted or n in wanted] or wanted
+        """Queues and ring groups shown on the wallboard."""
+        numbers = [str(q["Number"]) for q in self._queues]
+        return numbers or self.settings.queue_filter + self.settings.ring_group_filter
 
     def agent_numbers(self) -> set[str]:
-        wanted = set(self.queue_numbers())
-        return {str(a["Number"]) for q in self._queues if str(q.get("Number")) in wanted
-                for a in q.get("Agents") or [] if a.get("Number")}
+        return {str(a["Number"]) for q in self._queues for a in q.get("Agents") or [] if a.get("Number")}
+
+    def staff_numbers(self) -> set[str]:
+        return {str(u["Number"]) for u in self._users if u.get("Number")}
+
+    async def _load_groups(self) -> list[dict]:
+        """Queues (all, or WALLBOARD_QUEUES) plus the ring groups in WALLBOARD_RING_GROUPS."""
+        wanted_queues, wanted_groups = self.settings.queue_filter, self.settings.ring_group_filter
+        queues = [{**q, "kind": "queue"} for q in await self.client.list_queues()
+                  if q.get("Number") and (not wanted_queues or str(q["Number"]) in wanted_queues)]
+        if not wanted_groups:
+            return queues
+        groups = {str(g["Number"]): g for g in await self.client.list_ring_groups() if g.get("Number")}
+        missing = [n for n in wanted_groups if n not in groups]
+        if missing:
+            log.warning("Ring groups not found on the PBX: %s", ", ".join(missing))
+        return queues + [{"Number": n, "Name": groups[n].get("Name") or n, "Agents": groups[n].get("Members") or [],
+                          "kind": "ring_group"} for n in wanted_groups if n in groups]
 
     async def _poll_loop(self) -> None:
         interval = self.settings.poll_interval_seconds
@@ -112,7 +127,7 @@ class WallboardService:
     async def poll_once(self) -> None:
         self._users, calls = await asyncio.gather(self.client.list_users(), self.client.active_calls())
         if not self._directory_ready.is_set() or time.monotonic() - self._queues_fetched > QUEUE_REFRESH_SECONDS:
-            self._queues = await self.client.list_queues()
+            self._queues = await self._load_groups()
             self._queues_fetched = time.monotonic()
             await self._save_directory()
             self._directory_ready.set()
@@ -120,8 +135,7 @@ class WallboardService:
         now = utcnow()
         today = local_today(self.settings.tz, now)
         day_stats = self._today if self._today and self._today.day == today else None
-        snapshot = build_snapshot(self._users, self._queues, calls, day_stats, now, self.settings.tz,
-                                  self.settings.queue_filter)
+        snapshot = build_snapshot(self._users, self._queues, calls, day_stats, now, self.settings.tz, [])
         snapshot["slow_answer_seconds"] = self.settings.slow_answer_seconds
         if self._stats_error:
             snapshot["errors"].append(f"Daily counters could not be refreshed: {self._stats_error}")
@@ -206,7 +220,7 @@ class WallboardService:
     async def sync(self, day: date) -> DayStats:
         async with self._day_locks[day]:
             stats = await sync_day(self.client, self.sessionmaker, self.settings, day, self.queue_numbers(),
-                                   self.agent_numbers())
+                                   self.agent_numbers(), staff_exts=self.staff_numbers())
         if day == local_today(self.settings.tz):
             self._today = stats
         return stats

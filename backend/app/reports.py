@@ -153,12 +153,12 @@ def to_xlsx(data: ReportData) -> bytes:
     ws["A2"] = f"Period: {data.title}"
     ws["A3"] = f"Generated: {data.generated_at.astimezone(data.tz):%Y-%m-%d %H:%M} ({data.tz})"
     row = 5
-    ws.cell(row=row, column=1, value="Queues").font = Font(bold=True, size=12)
+    ws.cell(row=row, column=1, value="Queues and ring groups").font = Font(bold=True, size=12)
     queue_rows = []
     for number, name in data.queues:
         t = _totals([data.queue_day(d, number) for d in data.days], ("received", "answered", "missed"))
         queue_rows.append([name, number, t["received"], t["answered"], t["missed"], _rate(t["answered"], t["received"])])
-    row = _write_table(ws, row + 1, ["Queue", "Number", "Received calls", "Answered calls", "Missed calls", "Answer rate"],
+    row = _write_table(ws, row + 1, ["Queue / ring group", "Number", "Received calls", "Answered calls", "Missed calls", "Answer rate"],
                        queue_rows, {6: "0.0%"}) + 1
     ws.cell(row=row, column=1, value="Agents").font = Font(bold=True, size=12)
     agent_rows = []
@@ -195,7 +195,7 @@ def to_xlsx(data: ReportData) -> bytes:
         for number, name in data.queues:
             s = data.queue_day(day, number)
             rows.append([day, name, number, s["received"], s["answered"], s["missed"], _rate(s["answered"], s["received"])])
-    _write_table(ws, 1, ["Date", "Queue", "Number", "Received calls", "Answered calls", "Missed calls", "Answer rate"],
+    _write_table(ws, 1, ["Date", "Queue / ring group", "Number", "Received calls", "Answered calls", "Missed calls", "Answer rate"],
                  rows, {1: "yyyy-mm-dd", 7: "0.0%"})
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:G{len(rows) + 1}"
@@ -236,7 +236,7 @@ def to_csv(data: ReportData) -> bytes:
             w.writerow([day.isoformat(), name, ext, *(s[f] for f in COUNT_FIELDS),
                         _hms(s["talk_seconds"]), _hms(s["work_seconds"])])
     w.writerow([])
-    w.writerow(["Date", "Queue", "Number", "Received calls", "Answered calls", "Missed calls"])
+    w.writerow(["Date", "Queue / ring group", "Number", "Received calls", "Answered calls", "Missed calls"])
     for day in data.days:
         for number, name in data.queues:
             s = data.queue_day(day, number)

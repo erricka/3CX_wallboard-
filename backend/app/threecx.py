@@ -151,6 +151,9 @@ class ThreeCXClient:
     async def list_queues(self) -> list[dict]:
         return await self.get_all(f"{API}/Queues", {"$select": "Id,Number,Name", "$expand": "Agents"})
 
+    async def list_ring_groups(self) -> list[dict]:
+        return await self.get_all(f"{API}/RingGroups", {"$select": "Id,Number,Name", "$expand": "Members"})
+
     async def active_calls(self) -> list[dict]:
         return (await self.get(f"{API}/ActiveCalls")).get("value", [])
 

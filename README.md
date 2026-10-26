@@ -1,7 +1,8 @@
 # AMK Call Center Wallboard (3CX)
 
 Real-time call-center wallboard for 3CX v20 with downloadable daily reports, styled for AMK Bank
-and built for a large office TV: queues on the left, up to 30 agents on the right, all on one screen.
+and built for a large office TV: queues and ring groups on the left, up to 30 agents on the right, all on one
+screen (from 1280 px wide; narrower screens stack them).
 
 - **Frontend:** React (Vite), built into the same Docker image and served by the backend
 - **Backend:** Python (FastAPI). Polls the 3CX XAPI and pushes updates over a WebSocket.
@@ -25,14 +26,14 @@ Finished days are fetched once and then served from the database. Today is refre
 | Wallboard column | Source |
 |---|---|
 | Agent **Status** | `ActiveCalls`: the agent is on a call → **Talking**, or **Ringing**. Otherwise `Users.QueueStatus`: logged out → **Logoff**. Logged in with profile *Available* → **Ready**. Any other profile (Away, DND, …) shows the profile name. Phone not registered → **Offline**. |
-| Agents in work / free / talk | Agents of the queue who are logged in / *Ready* / *Talking* |
-| Calls waiting in queue, Max wait time | `ActiveCalls` whose callee is the queue and no agent is connected yet. Wait time = now − `LastChangeStatus`. |
-| Answered / Missed calls (queue) | `ReportQueuePerformanceTotals` for today: answered = `ExtensionAnsweredCount`, missed = received − answered |
+| Agents in work / free / talk | Queue: agents logged in to the queue / *Ready* / *Talking*. Ring group: members whose phone is online / *Ready* / *Talking* (ring groups have no login). |
+| Calls waiting, Max wait time | `ActiveCalls` whose callee is the queue or ring group and no agent is connected yet. Wait time = now − `LastChangeStatus`. |
+| Answered / Missed calls | Queues: `ReportQueuePerformanceTotals` for today (answered = `ExtensionAnsweredCount`, missed = received − answered). Ring groups, and queues the report leaves out: the call log (`ReportCallLogData`), where a call counts as answered when any extension of the PBX picked it up. |
 | Inbound calls | `ReportExtensionStatistics.InboundAnsweredCount` |
 | Outbound calls | `OutboundAnsweredCount + OutboundUnansweredCount` |
 | Missed calls (agent) | `InboundUnansweredCount` |
 | Unanswered within 5 sec | Call log (`ReportCallLogData`): calls that rang the agent for more than 5 s, whether answered late or never. Queue legs are used, so queue waiting time is not counted. Counted once per call. The threshold is set with `SLOW_ANSWER_SECONDS`. |
-| Work time | `ReportAgentLoginHistory`: the union of queue login sessions today, so overlapping queues count once. If that report is unavailable, the wallboard's own status history is used. |
+| Work time | `ReportAgentLoginHistory`: the union of queue login sessions today, so overlapping queues count once. Ring group members have no queue login: for them it is the time the wallboard saw their phone online (so only while the wallboard is running). If the report is unavailable, the wallboard's own status history is used for everyone. |
 
 All counters reset at 00:00 in `TIMEZONE` (default `Asia/Phnom_Penh`).
 
@@ -49,7 +50,7 @@ In the 3CX Admin Console: **Integrations → API → Add**.
 
 ```bash
 cp .env.example .env
-# edit .env: THREECX_CLIENT_SECRET, POSTGRES_PASSWORD, optionally WALLBOARD_QUEUES
+# edit .env: THREECX_CLIENT_SECRET, POSTGRES_PASSWORD, optionally WALLBOARD_QUEUES and WALLBOARD_RING_GROUPS
 ```
 
 `.env` is git-ignored. Never commit your API key.

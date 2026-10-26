@@ -128,7 +128,7 @@ def test_build_snapshot_statuses_and_queue_counters():
     assert by_ext["103"]["inbound"] == 7 and by_ext["103"]["unanswered_slow"] == 4
     assert by_ext["103"]["work_seconds"] == 2160 + 30
     assert [a["name"] for a in snap["agents"]][0] == "Bonthoeun Soth"
-    assert snap["queues"] == [{"number": "800", "name": "Inbound", "agents_in_work": 4, "agents_free": 1,
+    assert snap["queues"] == [{"number": "800", "name": "Inbound", "kind": "queue", "agents_in_work": 4, "agents_free": 1,
                                "agents_talk": 1, "calls_waiting": 1, "max_wait_seconds": 42,
                                "answered": 104, "missed": 14}]
 
@@ -315,3 +315,51 @@ def test_real_v20_shapes_callid_always_1_and_lowercase_login_field():
                                 "LoggedOutDt": "2026-10-26T11:26:32Z"}])
     assert sessions == [("0521", "9910", datetime(2026, 10, 26, 7, 29, 25, tzinfo=UTC),
                          datetime(2026, 10, 26, 11, 26, 32, tzinfo=UTC))]
+
+
+def test_ring_group_members_use_phone_status_not_queue_login():
+    now = datetime(2026, 10, 26, 3, tzinfo=UTC)
+    users = [
+        # in ring group 8001 only: logged out of queues, but the phone is online -> Ready
+        {"Number": "0360", "FirstName": "Chhuon", "LastName": "Danet", "QueueStatus": "LoggedOut", "IsRegistered": True},
+        {"Number": "0366", "FirstName": "Sak", "LastName": "K", "QueueStatus": "LoggedOut", "IsRegistered": False},
+        {"Number": "0367", "FirstName": "Thea", "LastName": "S", "QueueStatus": "LoggedIn", "IsRegistered": True},
+        # in queue 9910: queue login still decides
+        {"Number": "0521", "FirstName": "Po", "LastName": "Sam Nang", "QueueStatus": "LoggedOut", "IsRegistered": True},
+    ]
+    groups = [
+        {"Number": "9910", "Name": "QUE1", "kind": "queue", "Agents": [{"Number": "0521"}]},
+        {"Number": "8001", "Name": "MaxBIT-CallIN(PRO)", "kind": "ring_group",
+         "Agents": [{"Number": "0360"}, {"Number": "0366"}, {"Number": "0367"}]},
+    ]
+    calls = [{"Caller": "+85570", "Callee": "0367 Thea S", "Status": "Talking"}]
+    stats = DayStats(day=date(2026, 10, 26), synced_at=now, queues={"8001": {"received": 9, "answered": 7, "missed": 2}})
+    snap = build_snapshot(users, groups, calls, stats, now, TZ, [])
+
+    status = {a["extension"]: (a["status"], a["logged_in"]) for a in snap["agents"]}
+    assert status == {"0360": ("Ready", True), "0366": ("Offline", False), "0367": ("Talking", True),
+                      "0521": ("Logoff", False)}
+    ring = next(q for q in snap["queues"] if q["number"] == "8001")
+    assert (ring["kind"], ring["agents_in_work"], ring["agents_free"], ring["agents_talk"]) == ("ring_group", 2, 1, 1)
+    assert (ring["answered"], ring["missed"]) == (7, 2)
+
+
+def test_ring_group_call_taken_over_by_a_colleague_counts_as_answered():
+    from app.stats import call_log_counts
+
+    day = date(2026, 10, 26)
+    rows = [  # real shape: ring group 8001 hunts 0367, the call is picked up by 0322 (not a member)
+        {"MainCallHistoryId": "c1", "Indent": 1, "Direction": "Inbound", "SourceDn": "10000", "DestinationDn": "8001",
+         "Answered": False, "Status": "Redirected"},
+        {"MainCallHistoryId": "c1", "Indent": 1, "Direction": "Inbound", "SourceDn": "10000", "DestinationDn": "0367",
+         "Answered": False, "RingingDuration": "PT9S"},
+        {"MainCallHistoryId": "c1", "Indent": 1, "Direction": "Inbound", "SourceDn": "10000", "DestinationDn": "0322",
+         "Answered": True, "TalkingDuration": "PT23S"},
+        # nobody picked up
+        {"MainCallHistoryId": "c2", "Indent": 1, "Direction": "Inbound", "SourceDn": "10000", "DestinationDn": "8001",
+         "Answered": False, "Status": "Unanswered"},
+    ]
+    records = [parse_call_record(r, day) for r in rows]
+    agents, groups = call_log_counts(records, {"0360", "0366", "0367"}, ["8001"], staff_exts={"0322", "0367"})
+    assert groups["8001"] == {"name": "", "received": 2, "answered": 1, "missed": 1}
+    assert agents["0367"]["missed"] == 1
