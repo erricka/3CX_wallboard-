@@ -363,3 +363,29 @@ def test_ring_group_call_taken_over_by_a_colleague_counts_as_answered():
     agents, groups = call_log_counts(records, {"0360", "0366", "0367"}, ["8001"], staff_exts={"0322", "0367"})
     assert groups["8001"] == {"name": "", "received": 2, "answered": 1, "missed": 1}
     assert agents["0367"]["missed"] == 1
+
+
+async def test_only_ring_group_8001_titled_inbound_queue(tmp_path, monkeypatch):
+    from app.config import Settings
+    from app.service import WallboardService
+
+    env = tmp_path / ".env"
+    env.write_text("WALLBOARD_QUEUES=none\nWALLBOARD_RING_GROUPS=8001\nWALLBOARD_GROUP_NAMES=8001=Inbound Queue\n")
+    monkeypatch.chdir(tmp_path)
+    for var in ("WALLBOARD_QUEUES", "WALLBOARD_RING_GROUPS", "WALLBOARD_GROUP_NAMES"):
+        monkeypatch.delenv(var, raising=False)
+    settings = Settings(_env_file=str(env))
+    assert (settings.hide_queues, settings.queue_filter, settings.group_names) == (True, [], {"8001": "Inbound Queue"})
+
+    class PBX:
+        async def list_queues(self):
+            raise AssertionError("queues are hidden, so they are not even fetched")
+
+        async def list_ring_groups(self):
+            return [{"Number": "8000", "Name": "Maxbit", "Members": [{"Number": "0322"}]},
+                    {"Number": "8001", "Name": "MaxBIT-CallIN(PRO)", "Members": [{"Number": "0360"}, {"Number": "0367"}]}]
+
+    service = WallboardService(settings, PBX(), sessionmaker=None)
+    service._queues = await service._load_groups()
+    assert [(g["Number"], g["Name"], g["kind"]) for g in service._queues] == [("8001", "Inbound Queue", "ring_group")]
+    assert service.queue_numbers() == ["8001"] and service.agent_numbers() == {"0360", "0367"}

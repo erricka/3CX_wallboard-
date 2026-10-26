@@ -18,10 +18,12 @@ class Settings(BaseSettings):
 
     # Timezone of the call center; "today" / "yesterday" are calculated in this zone.
     timezone: str = "Asia/Phnom_Penh"
-    # Comma separated queue numbers to show, e.g. "800,801". Empty = all queues.
+    # Comma separated queue numbers to show, e.g. "800,801". Empty = all queues, "none" = no queues.
     wallboard_queues: str = ""
     # Comma separated ring group numbers to show as well, e.g. "8001". Empty = none.
     wallboard_ring_groups: str = ""
+    # Card titles instead of the PBX names, e.g. "8001=Inbound Queue;9910=Sales".
+    wallboard_group_names: str = ""
 
     poll_interval_seconds: float = 3
     # How often today's answered/missed/work-time counters are re-read from 3CX.
@@ -49,8 +51,19 @@ class Settings(BaseSettings):
         return ZoneInfo(self.timezone)
 
     @property
+    def hide_queues(self) -> bool:
+        return self.wallboard_queues.strip().lower() == "none"
+
+    @property
     def queue_filter(self) -> list[str]:
+        if self.hide_queues:
+            return []
         return [q.strip() for q in self.wallboard_queues.split(",") if q.strip()]
+
+    @property
+    def group_names(self) -> dict[str, str]:
+        pairs = (item.split("=", 1) for item in self.wallboard_group_names.split(";") if "=" in item)
+        return {number.strip(): name.strip() for number, name in pairs if number.strip() and name.strip()}
 
     @property
     def ring_group_filter(self) -> list[str]:

@@ -2,18 +2,22 @@
   "name": "3CX Wallboard",
   "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
   "features": {
-    "ghcr.io/devcontainers/features/node:1": { "version": "20" }
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    }
   },
   "containerEnv": {
-    "DATABASE_URL": "postgresql+asyncpg://wallboard:wallboard@127.0.0.1:5432/wallboard",
-    "THREECX_BASE_URL": "https://maxbit.3cx.asia",
-    "THREECX_CLIENT_ID": "dashboardamk",
-    "TIMEZONE": "Asia/Phnom_Penh",
-    "WALLBOARD_RING_GROUPS": "8001"
+    "DATABASE_URL": "postgresql+asyncpg://wallboard:wallboard@127.0.0.1:5432/wallboard"
   },
-  "forwardPorts": [8000],
+  "forwardPorts": [
+    8000
+  ],
   "portsAttributes": {
-    "8000": { "label": "Wallboard", "protocol": "http", "onAutoForward": "openBrowser" }
+    "8000": {
+      "label": "Wallboard",
+      "protocol": "http",
+      "onAutoForward": "openBrowser"
+    }
   },
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "postStartCommand": "setsid nohup bash .devcontainer/run.sh > /tmp/wallboard.log 2>&1 < /dev/null &"

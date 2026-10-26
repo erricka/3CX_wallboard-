@@ -212,6 +212,13 @@ table.agents { width: 100%; border-collapse: collapse; font-variant-numeric: tab
   .board .agents th, .board .agents td { padding-inline: 0.6rem; }
   .board .agent-name { max-width: 11rem; }
   .board .queue-grid.is-compact .queue-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  /* a single card has the whole column: larger tiles, readable from across the room */
+  .board .queue-grid.is-single .queue-card { padding: 18px 20px 20px; gap: 14px; }
+  .board .queue-grid.is-single .queue-head h3 { font-size: 1.6rem; }
+  .board .queue-grid.is-single .queue-tiles { gap: 12px; }
+  .board .queue-grid.is-single .tile { padding: clamp(0.5rem, 1.4vh, 1.1rem) 1.1rem; gap: 4px; }
+  .board .queue-grid.is-single .tile dt { font-size: clamp(0.9rem, 1.9vh, 1.2rem); }
+  .board .queue-grid.is-single .tile dd { font-size: clamp(2rem, 6vh, 5rem); }
   .board .queue-grid.is-compact .tile dt { font-size: clamp(0.7rem, 1.35vh, 0.9rem); }
 }
 

@@ -29,6 +29,8 @@ services:
       - key: TIMEZONE
         value: Asia/Phnom_Penh
       - key: WALLBOARD_QUEUES
-        value: ""
+        value: none
       - key: WALLBOARD_RING_GROUPS
         value: "8001"
+      - key: WALLBOARD_GROUP_NAMES
+        value: "8001=Inbound Queue"

@@ -50,7 +50,8 @@ In the 3CX Admin Console: **Integrations → API → Add**.
 
 ```bash
 cp .env.example .env
-# edit .env: THREECX_CLIENT_SECRET, POSTGRES_PASSWORD, optionally WALLBOARD_QUEUES and WALLBOARD_RING_GROUPS
+# edit .env: THREECX_CLIENT_SECRET, POSTGRES_PASSWORD, and which cards to show:
+#   WALLBOARD_QUEUES (none = no queues), WALLBOARD_RING_GROUPS, WALLBOARD_GROUP_NAMES (card titles)
 ```
 
 `.env` is git-ignored. Never commit your API key.

@@ -11,13 +11,13 @@ const TILES = [
   ['missed', 'Missed Calls', 'plain'],
 ]
 
-function QueueCard({ queue: q }) {
+function QueueCard({ queue: q, showKind }) {
   return (
     <article className="queue-card">
       <header className="queue-head">
         <h3>{q.name}</h3>
         <span className="queue-number">
-          {q.kind === 'ring_group' && <span className="queue-kind">Ring group</span>}
+          {showKind && q.kind === 'ring_group' && <span className="queue-kind">Ring group</span>}
           {q.number}
         </span>
       </header>
@@ -35,10 +35,12 @@ function QueueCard({ queue: q }) {
 
 export default function QueueCards({ queues }) {
   if (queues.length === 0) return <p className="empty">No queues found on the PBX.</p>
-  // With three or more cards the tiles go four across, so every card still fits beside the agents.
+  // Label ring groups only when they are shown next to queues.
+  const mixed = new Set(queues.map((q) => q.kind)).size > 1
+  // Three or more cards: tiles four across so every card fits beside the agents. One card: bigger tiles.
   return (
-    <div className={`queue-grid${queues.length >= 3 ? ' is-compact' : ''}`}>
-      {queues.map((q) => <QueueCard key={q.number} queue={q} />)}
+    <div className={`queue-grid${queues.length >= 3 ? ' is-compact' : ''}${queues.length === 1 ? ' is-single' : ''}`}>
+      {queues.map((q) => <QueueCard key={q.number} queue={q} showKind={mixed} />)}
     </div>
   )
 }

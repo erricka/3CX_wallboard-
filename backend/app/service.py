@@ -100,18 +100,21 @@ class WallboardService:
         return {str(u["Number"]) for u in self._users if u.get("Number")}
 
     async def _load_groups(self) -> list[dict]:
-        """Queues (all, or WALLBOARD_QUEUES) plus the ring groups in WALLBOARD_RING_GROUPS."""
+        """Queues (all, WALLBOARD_QUEUES, or none) plus the ring groups in WALLBOARD_RING_GROUPS,
+        titled from WALLBOARD_GROUP_NAMES where given."""
         wanted_queues, wanted_groups = self.settings.queue_filter, self.settings.ring_group_filter
-        queues = [{**q, "kind": "queue"} for q in await self.client.list_queues()
-                  if q.get("Number") and (not wanted_queues or str(q["Number"]) in wanted_queues)]
-        if not wanted_groups:
-            return queues
-        groups = {str(g["Number"]): g for g in await self.client.list_ring_groups() if g.get("Number")}
-        missing = [n for n in wanted_groups if n not in groups]
-        if missing:
-            log.warning("Ring groups not found on the PBX: %s", ", ".join(missing))
-        return queues + [{"Number": n, "Name": groups[n].get("Name") or n, "Agents": groups[n].get("Members") or [],
-                          "kind": "ring_group"} for n in wanted_groups if n in groups]
+        queues = [] if self.settings.hide_queues else [
+            {**q, "kind": "queue"} for q in await self.client.list_queues()
+            if q.get("Number") and (not wanted_queues or str(q["Number"]) in wanted_queues)]
+        if wanted_groups:
+            groups = {str(g["Number"]): g for g in await self.client.list_ring_groups() if g.get("Number")}
+            missing = [n for n in wanted_groups if n not in groups]
+            if missing:
+                log.warning("Ring groups not found on the PBX: %s", ", ".join(missing))
+            queues += [{"Number": n, "Name": groups[n].get("Name") or n, "Agents": groups[n].get("Members") or [],
+                        "kind": "ring_group"} for n in wanted_groups if n in groups]
+        names = self.settings.group_names
+        return [{**q, "Name": names.get(str(q["Number"]), q.get("Name"))} for q in queues]
 
     async def _poll_loop(self) -> None:
         interval = self.settings.poll_interval_seconds
