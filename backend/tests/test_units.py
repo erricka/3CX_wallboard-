@@ -290,3 +290,28 @@ def test_report_endpoint_rejects_bad_date_ranges():
         assert detail("period=range&start=2026-06-01&end=2999-01-01") == (400, "The end date cannot be in the future.")
         assert detail("period=range&start=2026-06-01&end=2026-10-10")[0] == 503  # valid; database not up here
         assert client.get("/api/reports/daily?period=range&start=june&end=2026-10-10").status_code == 422
+
+
+def test_real_v20_shapes_callid_always_1_and_lowercase_login_field():
+    """Shapes seen on the real PBX: every row CallId/SegmentId 1, calls told apart by MainCallHistoryId,
+    login history with 'loggedInDt'."""
+    from app.stats import call_log_counts, parse_sessions
+
+    day = date(2026, 10, 26)
+    rows = [
+        {"CallId": 1, "SegmentId": 1, "Indent": 1, "MainCallHistoryId": "call-a", "Direction": "Outbound",
+         "SourceDn": "0360", "DestinationDn": "10000", "Answered": False, "TalkingDuration": "PT0S"},
+        {"CallId": 1, "SegmentId": 1, "Indent": 1, "MainCallHistoryId": "call-b", "Direction": "Outbound",
+         "SourceDn": "0360", "DestinationDn": "10000", "Answered": True, "TalkingDuration": "PT8M"},
+        {"CallId": 1, "SegmentId": 1, "Indent": 1, "MainCallHistoryId": "call-c", "Direction": "Inbound",
+         "SourceDn": "10000", "DestinationDn": "0360", "Answered": True, "TalkingDuration": "PT1M"},
+    ]
+    records = [parse_call_record(r, day) for r in rows]
+    assert [r["call_id"] for r in records] == ["call-a", "call-b", "call-c"]
+    agents, _ = call_log_counts(records, {"0360"}, ["9910"])
+    assert (agents["0360"]["outbound"], agents["0360"]["inbound"], agents["0360"]["talk_seconds"]) == (2, 1, 540)
+
+    sessions = parse_sessions([{"AgentNo": "0521", "QueueNo": "9910", "loggedInDt": "2026-10-26T07:29:25Z",
+                                "LoggedOutDt": "2026-10-26T11:26:32Z"}])
+    assert sessions == [("0521", "9910", datetime(2026, 10, 26, 7, 29, 25, tzinfo=UTC),
+                         datetime(2026, 10, 26, 11, 26, 32, tzinfo=UTC))]

@@ -17,12 +17,12 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .config import Settings
-from .models import AgentDailyStats, AgentSession, AgentStatusLog, CallRecord, QueueDailyStats, SyncedDay
+from .models import AgentDailyStats, AgentSession, AgentStatusLog, CallRecord, Meta, QueueDailyStats, SyncedDay
 from .parsing import parse_datetime, parse_duration
 from .threecx import ThreeCXClient, ThreeCXError
 from .timeutil import day_bounds_utc, merged_seconds, utcnow
@@ -33,6 +33,8 @@ log = logging.getLogger(__name__)
 COMPLETE_GRACE = timedelta(minutes=10)
 # Login history lists sessions by when they started; agents often stay logged in for days.
 LOGIN_LOOKBACK = timedelta(days=7)
+# Bump when the way daily stats are worked out changes: days stored by an older version are fetched again.
+STATS_VERSION = 2
 
 
 @dataclass
@@ -86,7 +88,8 @@ def parse_call_record(row: dict, day: date) -> dict:
 
     return {
         "day": day,
-        "call_id": text("CallId", 64),
+        # v20 numbers every row CallId 1; MainCallHistoryId is what ties the rows of one call together.
+        "call_id": str(row.get("MainCallHistoryId") or row.get("CallHistoryId") or row.get("CallId") or "")[:64],
         "segment_id": row.get("SegmentId"),
         "indent": int(row.get("Indent") or 0),
         "start_time": parse_datetime(row.get("StartTime")),
@@ -109,10 +112,12 @@ def slow_answer_counts(records: list[dict], extensions: set[str], threshold: flo
 
     A call log entry has a main row plus one sub-row per leg (queue -> agent); legs are
     used when present so that queue waiting time is not counted as agent ringing time.
-    Each agent is counted at most once per call.
+    Each agent is counted at most once per call, and only for inbound calls.
     """
     counts: Counter = Counter()
     for rows in _calls(records):
+        if _direction(rows) in ("internal", "outbound"):
+            continue  # only callers waiting for an agent count, like the inbound and missed columns
         legs = [r for r in rows if r["indent"] > 0] or rows
         counts.update({
             r["destination_dn"] for r in legs
@@ -181,7 +186,7 @@ def parse_sessions(rows: list[dict]) -> list[tuple[str, str, datetime, datetime 
     sessions = []
     for row in rows:
         ext = str(row.get("AgentNo") or "")
-        logged_in = parse_datetime(row.get("LoggedInDt"))
+        logged_in = parse_datetime(row.get("LoggedInDt") or row.get("loggedInDt"))  # v20 spells it loggedInDt
         if ext and logged_in:
             sessions.append((ext, str(row.get("QueueNo") or ""), logged_in, parse_datetime(row.get("LoggedOutDt"))))
     return sessions
@@ -242,10 +247,14 @@ async def sync_day(client: ThreeCXClient, sessionmaker: async_sessionmaker, sett
     records = [parse_call_record(r, day) for r in log_rows or []]
     derived_agents, derived_queues = call_log_counts(records, agent_exts, queue_numbers)
     agents = extension_counts(ext_rows) if ext_rows is not None else derived_agents
-    if queue_rows is not None:
+    # The queue report leaves out its count fields when a queue had no calls; count from the call log then.
+    if queue_rows and any("QueueReceivedCount" in r for r in queue_rows):
         queues = {q: v for q, v in queue_counts(queue_rows).items() if not queue_numbers or q in queue_numbers}
     else:
         queues = derived_queues
+        names = {str(r.get("QueueDn")): r.get("QueueDisplayName") or "" for r in queue_rows or []}
+        for q, v in queues.items():
+            v["name"] = names.get(q, v["name"])
     slow = slow_answer_counts(records, agent_exts | set(agents), settings.slow_answer_seconds)
     for ext, count in slow.items():
         agents.setdefault(ext, empty_agent())["unanswered_slow"] = count
@@ -288,3 +297,15 @@ async def incomplete_days(sessionmaker: async_sessionmaker, days: list[date]) ->
             select(SyncedDay.day).where(SyncedDay.day.in_(days), SyncedDay.complete.is_(True))
         )).scalars())
     return [d for d in days if d not in done]
+
+
+async def refetch_if_outdated(sessionmaker: async_sessionmaker) -> bool:
+    """Mark every stored day for a fresh fetch when it was worked out by an older STATS_VERSION."""
+    async with sessionmaker() as session, session.begin():
+        stored = await session.get(Meta, "stats_version")
+        if stored and stored.value == str(STATS_VERSION):
+            return False
+        await session.execute(update(SyncedDay).values(complete=False))
+        await session.merge(Meta(key="stats_version", value=str(STATS_VERSION)))
+    log.info("Daily stats rules changed (version %s): stored days will be fetched from 3CX again", STATS_VERSION)
+    return True

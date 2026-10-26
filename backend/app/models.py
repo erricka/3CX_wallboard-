@@ -121,3 +121,12 @@ class SyncedDay(Base):
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     # True once the day is over and every source synced cleanly; it is not fetched again.
     complete: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class Meta(Base):
+    """Small key/value settings, e.g. which stats version the stored days were made with."""
+
+    __tablename__ = "meta"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(200), default="")

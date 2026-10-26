@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from .config import Settings
 from .models import Agent, AgentStatusLog, Queue
-from .stats import DayStats, incomplete_days, sync_day
+from .stats import DayStats, incomplete_days, refetch_if_outdated, sync_day
 from .threecx import ThreeCXClient, ThreeCXError
 from .timeutil import local_today, utcnow
 from .wallboard import build_snapshot, user_name
@@ -60,6 +60,7 @@ class WallboardService:
             await session.execute(
                 update(AgentStatusLog).where(AgentStatusLog.ended_at.is_(None))
                 .values(ended_at=func.coalesce(AgentStatusLog.last_seen_at, AgentStatusLog.started_at)))
+        await refetch_if_outdated(self.sessionmaker)
         self.db_ready = True
         await asyncio.gather(self._poll_loop(), self._stats_loop())
 
