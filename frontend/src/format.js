@@ -6,10 +6,10 @@ export function hoursMinutes(seconds) {
   return `${pad(Math.floor(minutes / 60))}h ${pad(minutes % 60)}m`
 }
 
-// 42 -> "00m 42s"
-export function minutesSeconds(seconds) {
+// 155 -> "02:35"
+export function waitTime(seconds) {
   const s = Math.floor(seconds || 0)
-  return `${pad(Math.floor(s / 60))}m ${pad(s % 60)}s`
+  return `${pad(Math.floor(s / 60))}:${pad(s % 60)}`
 }
 
 export function clockTime(iso) {

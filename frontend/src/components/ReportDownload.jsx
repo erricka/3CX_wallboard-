@@ -37,18 +37,20 @@ export default function ReportDownload() {
 
   return (
     <div className="report">
-      <label>
-        Daily report
-        <select value={period} onChange={(e) => setPeriod(e.target.value)} disabled={busy}>
+      <span className="report-title">Daily report</span>
+      <div className="report-controls">
+        <select id="report-period" value={period} onChange={(e) => setPeriod(e.target.value)} disabled={busy}
+          aria-label="Report period">
           {PERIODS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
-      </label>
-      <select value={format} onChange={(e) => setFormat(e.target.value)} disabled={busy} aria-label="File format">
-        <option value="xlsx">Excel</option>
-        <option value="csv">CSV</option>
-      </select>
-      <button onClick={download} disabled={busy}>{busy ? 'Preparing…' : 'Download report'}</button>
-      {error && <span className="report-error">{error}</span>}
+        <select id="report-format" value={format} onChange={(e) => setFormat(e.target.value)} disabled={busy}
+          aria-label="File format">
+          <option value="xlsx">Excel</option>
+          <option value="csv">CSV</option>
+        </select>
+        <button type="button" onClick={download} disabled={busy}>{busy ? 'Preparing…' : 'Download'}</button>
+      </div>
+      {error && <p className="report-error" role="alert">{error}</p>}
     </div>
   )
 }
