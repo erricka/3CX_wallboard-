@@ -26,10 +26,12 @@ export default function App() {
       <header className="topbar">
         <div className="brand">
           <h1>3CX Wallboard</h1>
-          <span className={`conn ${live ? 'conn-live' : 'conn-down'}`}>
-            <i className="dot" />
-            {live ? 'Live' : 'Reconnecting'}
-          </span>
+          {snapshot && !live && (
+            <span className="conn conn-down">
+              <i className="dot" />
+              Reconnecting
+            </span>
+          )}
         </div>
         <div className="clock">
           <span className="clock-time">{now.toLocaleTimeString()}</span>
@@ -62,7 +64,7 @@ export default function App() {
             </section>
 
             <footer className="footnote">
-              Live status every 3 seconds · daily counters since 00:00 ({snapshot.timezone}), refreshed{' '}
+              Status updates every 3 seconds · daily counters since 00:00 ({snapshot.timezone}), refreshed{' '}
               {clockTime(snapshot.stats_synced_at)} · last update {clockTime(snapshot.generated_at)}
             </footer>
           </>
