@@ -60,6 +60,27 @@ class QueueDailyStats(Base):
                                                  onupdate=func.now())
 
 
+class OverallDailyStats(Base):
+    """Every call on the PBX in one day (stats.overall_counts)."""
+
+    __tablename__ = "overall_daily_stats"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    inbound: Mapped[int] = mapped_column(Integer, default=0)
+    outbound: Mapped[int] = mapped_column(Integer, default=0)
+    internal: Mapped[int] = mapped_column(Integer, default=0)
+    inbound_answered: Mapped[int] = mapped_column(Integer, default=0)
+    inbound_missed: Mapped[int] = mapped_column(Integer, default=0)
+    outbound_answered: Mapped[int] = mapped_column(Integer, default=0)
+    internal_answered: Mapped[int] = mapped_column(Integer, default=0)
+    talk_seconds: Mapped[float] = mapped_column(Float, default=0)
+    wait_seconds: Mapped[float] = mapped_column(Float, default=0)
+    max_wait_seconds: Mapped[float] = mapped_column(Float, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(),
+                                                 onupdate=func.now())
+
+
 class CallRecord(Base):
     """One row of the 3CX call log (main rows and their segment sub-rows)."""
 

@@ -4,7 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from .parsing import number_tokens, parse_datetime
-from .stats import DayStats, empty_agent
+from .stats import DayStats, empty_agent, empty_overall
 
 READY_PROFILES = {"available"}
 RINGING_STATES = {"ringing"}
@@ -69,6 +69,27 @@ def agent_status(user: dict, call_state: str | None, queue_login: bool = True) -
     return profile, "away"
 
 
+def overall_row(o: dict | None, calls: list[dict]) -> dict:
+    """Whole-PBX tiles: today's counts from the call log plus the calls going on right now."""
+    o = o or empty_overall()
+    answered = o["inbound_answered"] + o["outbound_answered"] + o["internal_answered"]
+    reached = o["inbound_answered"] + o["inbound_missed"]
+    return {
+        "total_calls": o["total"],
+        "inbound": o["inbound"],
+        "outbound": o["outbound"],
+        "internal": o["internal"],
+        "inbound_answered": o["inbound_answered"],
+        "inbound_missed": o["inbound_missed"],
+        "answer_rate": round(100 * o["inbound_answered"] / reached) if reached else None,
+        "outbound_answered": o["outbound_answered"],
+        "avg_talk_seconds": round(o["talk_seconds"] / answered) if answered else 0,
+        "total_talk_seconds": round(o["talk_seconds"]),
+        "avg_wait_seconds": round(o["wait_seconds"] / o["inbound_answered"]) if o["inbound_answered"] else 0,
+        "calls_now": len(calls),
+    }
+
+
 def build_snapshot(users: list[dict], queues: list[dict], calls: list[dict], day_stats: DayStats | None,
                    now: datetime, tz: ZoneInfo, queue_filter: list[str]) -> dict:
     users_by_ext = {str(u["Number"]): u for u in users if u.get("Number")}
@@ -124,6 +145,8 @@ def build_snapshot(users: list[dict], queues: list[dict], calls: list[dict], day
                 and (a["logged_in"] if kind == "queue" else a["extension"] in online)]
         waits = waiting.get(number, [])
         qs = (day_stats.queues.get(number) if day_stats else None) or {}
+        answered, missed = qs.get("answered", 0), qs.get("missed", 0)
+        reached = answered + missed
         queue_rows.append({
             "number": number,
             "name": q.get("Name") or number,
@@ -133,8 +156,9 @@ def build_snapshot(users: list[dict], queues: list[dict], calls: list[dict], day
             "agents_talk": sum(a["kind"] == "talking" for a in team),
             "calls_waiting": len(waits),
             "max_wait_seconds": round(max(waits, default=0)),
-            "answered": qs.get("answered", 0),
-            "missed": qs.get("missed", 0),
+            "answered": answered,
+            "missed": missed,
+            "answer_rate": round(100 * answered / reached) if reached else None,
         })
 
     return {
@@ -142,6 +166,7 @@ def build_snapshot(users: list[dict], queues: list[dict], calls: list[dict], day
         "day": now.astimezone(tz).date().isoformat(),
         "timezone": str(tz),
         "stats_synced_at": day_stats.synced_at.isoformat() if day_stats else None,
+        "overall": overall_row(day_stats.overall if day_stats else None, calls),
         "queues": queue_rows,
         "agents": agents,
         "errors": [],

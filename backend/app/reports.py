@@ -13,11 +13,16 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Agent, AgentDailyStats, CallRecord, Queue, QueueDailyStats
+from .models import Agent, AgentDailyStats, CallRecord, OverallDailyStats, Queue, QueueDailyStats
 from .timeutil import PERIODS
 
 COUNT_FIELDS = ("inbound", "outbound", "missed", "unanswered_slow")
 TIME_FIELDS = ("talk_seconds", "work_seconds")
+OVERALL_FIELDS = ("total", "inbound", "outbound", "internal", "inbound_answered", "inbound_missed",
+                  "outbound_answered", "internal_answered", "talk_seconds", "wait_seconds", "max_wait_seconds")
+OVERALL_HEADERS = ["Total calls", "Inbound calls", "Outbound calls", "Internal calls", "Inbound answered",
+                   "Inbound missed", "Answer rate", "Outbound answered", "Talk time", "Average talk time",
+                   "Average wait time", "Longest wait time"]
 
 
 @dataclass
@@ -31,6 +36,7 @@ class ReportData:
     queues: list[tuple[str, str]] = field(default_factory=list)  # (number, name)
     agent_daily: dict[tuple[date, str], dict] = field(default_factory=dict)
     queue_daily: dict[tuple[date, str], dict] = field(default_factory=dict)
+    overall_daily: dict[date, dict] = field(default_factory=dict)
     calls: list[CallRecord] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -49,6 +55,15 @@ class ReportData:
 
     def queue_day(self, day: date, number: str) -> dict:
         return self.queue_daily.get((day, number)) or {"received": 0, "answered": 0, "missed": 0}
+
+    def overall_day(self, day: date) -> dict:
+        return self.overall_daily.get(day) or {f: 0 for f in OVERALL_FIELDS}
+
+    def overall_total(self) -> dict:
+        days = [self.overall_day(d) for d in self.days]
+        total = _totals(days, OVERALL_FIELDS)
+        total["max_wait_seconds"] = max((d["max_wait_seconds"] for d in days), default=0)
+        return total
 
 
 async def load_report(session: AsyncSession, period: str, days: list[date], tz: ZoneInfo, queue_filter: list[str],
@@ -76,16 +91,17 @@ async def load_report(session: AsyncSession, period: str, days: list[date], tz: 
         data.queue_daily[(row.day, row.queue)] = {"received": row.received, "answered": row.answered,
                                                    "missed": row.missed}
 
-    # Call log: main rows of every call that touched one of the report's agents or queues.
-    involved = agent_exts | set(queue_numbers)
+    for row in (await session.execute(select(OverallDailyStats).where(OverallDailyStats.day.in_(days)))).scalars():
+        data.overall_daily[row.day] = {f: getattr(row, f) for f in OVERALL_FIELDS}
+
+    # Call log: main rows of every call on the PBX, the calls the overall counts are made of.
     by_call: dict[str, list[CallRecord]] = defaultdict(list)
     for rec in (await session.execute(select(CallRecord).where(CallRecord.day.in_(days))
                                       .order_by(CallRecord.start_time, CallRecord.segment_id))).scalars():
         by_call[rec.call_id or f"segment-{rec.segment_id}"].append(rec)
     for rows in by_call.values():
-        if any({r.source_dn, r.destination_dn, r.action_dn} & involved for r in rows):
-            main = [r for r in rows if r.indent == 0]
-            data.calls.extend(main or rows)  # this PBX reports every row with Indent 1
+        main = [r for r in rows if r.indent == 0]
+        data.calls.extend(main or rows)  # this PBX reports every row with Indent 1
     data.calls.sort(key=lambda r: (r.start_time or now, r.segment_id or 0))
     return data
 
@@ -96,6 +112,19 @@ def _totals(rows: list[dict], fields) -> dict:
 
 def _rate(answered: int, received: int) -> float | None:
     return answered / received if received else None
+
+
+def overall_values(o: dict) -> list:
+    """The OVERALL_HEADERS columns; times as seconds."""
+    answered = o["inbound_answered"] + o["outbound_answered"] + o["internal_answered"]
+    return [o["total"], o["inbound"], o["outbound"], o["internal"], o["inbound_answered"], o["inbound_missed"],
+            _rate(o["inbound_answered"], o["inbound_answered"] + o["inbound_missed"]), o["outbound_answered"],
+            o["talk_seconds"], o["talk_seconds"] / answered if answered else 0,
+            o["wait_seconds"] / o["inbound_answered"] if o["inbound_answered"] else 0, o["max_wait_seconds"]]
+
+
+OVERALL_TIME_COLUMNS = (8, 9, 10, 11)  # 0-based positions of the time values in overall_values
+OVERALL_RATE_COLUMN = 6
 
 
 def _hms(seconds: float) -> str:
@@ -140,6 +169,16 @@ def _autosize(ws, minimum: int = 10, maximum: int = 40) -> None:
         ws.column_dimensions[get_column_letter(col)].width = min(max(width + 2, minimum), maximum)
 
 
+def _overall_cells(o: dict) -> list:
+    return [v / 86400 if i in OVERALL_TIME_COLUMNS else v for i, v in enumerate(overall_values(o))]
+
+
+def _overall_formats(first_col: int) -> dict[int, str]:
+    formats = {first_col + i: TIME_FORMAT for i in OVERALL_TIME_COLUMNS}
+    formats[first_col + OVERALL_RATE_COLUMN] = "0.0%"
+    return formats
+
+
 def to_xlsx(data: ReportData) -> bytes:
     wb = Workbook()
     slow = f"Unanswered within {data.slow_seconds} sec"
@@ -153,6 +192,9 @@ def to_xlsx(data: ReportData) -> bytes:
     ws["A2"] = f"Period: {data.title}"
     ws["A3"] = f"Generated: {data.generated_at.astimezone(data.tz):%Y-%m-%d %H:%M} ({data.tz})"
     row = 5
+    ws.cell(row=row, column=1, value="All calls on the PBX").font = Font(bold=True, size=12)
+    row = _write_table(ws, row + 1, ["Period", *OVERALL_HEADERS], [[data.title, *_overall_cells(data.overall_total())]],
+                       _overall_formats(2)) + 1
     ws.cell(row=row, column=1, value="Queues and ring groups").font = Font(bold=True, size=12)
     queue_rows = []
     for number, name in data.queues:
@@ -188,6 +230,14 @@ def to_xlsx(data: ReportData) -> bytes:
     ws.auto_filter.ref = f"A1:I{len(rows) + 1}"
     _autosize(ws)
 
+    # Daily totals of every call on the PBX
+    ws = wb.create_sheet("Daily Overall")
+    rows = [[day, *_overall_cells(data.overall_day(day))] for day in data.days]
+    _write_table(ws, 1, ["Date", *OVERALL_HEADERS], rows, {1: "yyyy-mm-dd", **_overall_formats(2)})
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(OVERALL_HEADERS) + 1)}{len(rows) + 1}"
+    _autosize(ws)
+
     # Daily queue stats
     ws = wb.create_sheet("Daily Queues")
     rows = []
@@ -206,14 +256,14 @@ def to_xlsx(data: ReportData) -> bytes:
     rows = []
     for c in data.calls:
         start = c.start_time.astimezone(data.tz).replace(tzinfo=None) if c.start_time else None
-        rows.append([start, c.call_id, c.source_dn, c.source_name, c.destination_dn, c.destination_name,
-                     c.action_name or c.action_dn, "Yes" if c.answered else "No",
-                     c.ringing_seconds / 86400, c.talking_seconds / 86400, c.reason])
-    _write_table(ws, 1, ["Start time", "Call ID", "From", "From name", "To", "To name", "Via", "Answered",
-                         "Ringing", "Talking", "Reason"], rows,
-                 {1: "yyyy-mm-dd hh:mm:ss", 9: TIME_FORMAT, 10: TIME_FORMAT})
+        rows.append([start, c.call_id, (c.raw or {}).get("Direction") or "", c.source_dn, c.source_name,
+                     c.destination_dn, c.destination_name, c.action_name or c.action_dn,
+                     "Yes" if c.answered else "No", c.ringing_seconds / 86400, c.talking_seconds / 86400, c.reason])
+    _write_table(ws, 1, ["Start time", "Call ID", "Direction", "From", "From name", "To", "To name", "Via",
+                         "Answered", "Ringing", "Talking", "Reason"], rows,
+                 {1: "yyyy-mm-dd hh:mm:ss", 10: TIME_FORMAT, 11: TIME_FORMAT})
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:K{len(rows) + 1}"
+    ws.auto_filter.ref = f"A1:L{len(rows) + 1}"
     _autosize(ws)
 
     out = io.BytesIO()
@@ -227,6 +277,14 @@ def to_csv(data: ReportData) -> bytes:
     out = io.StringIO()
     w = csv.writer(out)
     w.writerow(["3CX Call Center Daily Report", data.title])
+    w.writerow([])
+    w.writerow(["All calls on the PBX"])
+    w.writerow(["Date", *OVERALL_HEADERS])
+    for day in data.days:
+        values = overall_values(data.overall_day(day))
+        w.writerow([day.isoformat(), *(
+            _hms(v) if i in OVERALL_TIME_COLUMNS else ("" if v is None else f"{v:.1%}") if i == OVERALL_RATE_COLUMN else v
+            for i, v in enumerate(values))])
     w.writerow([])
     w.writerow(["Date", "Agent", "Extension", "Inbound calls", "Outbound calls", "Missed calls",
                 f"Unanswered within {data.slow_seconds} sec", "Talk time", "Work time"])

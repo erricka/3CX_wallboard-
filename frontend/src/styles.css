@@ -1,6 +1,7 @@
 /* AMK Bank wallboard for a large office TV.
-   Layout: AMK magenta header band (logo, title, clock, report), then queue cards on the left and the
-   agent table on the right. Sizes are in rem off a viewport-scaled root, so a TV scales it all up.
+   Layout: AMK magenta header band (logo, title, clock, report), then the overall tiles (every call on
+   the PBX) and the queue cards on the left, and the agent table on the right. Sizes are in rem off a
+   viewport-scaled root, so a TV scales it all up.
    One light look on purpose, matching amkbank.com.kh; colours are set explicitly for every surface. */
 :root {
   color-scheme: light;
@@ -119,6 +120,16 @@ h1, h2, h3, p, dl, dd { margin: 0; }
   border-radius: 8px; padding: 10px 14px; font-weight: 700;
 }
 
+/* ---- overall: twelve tiles, four across ---- */
+.overall-tiles {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px;
+}
+.tile-total { background: var(--amk); color: #ffffff; }
+.tile-total dt { color: rgba(255, 255, 255, 0.85); }
+.rate-bar { display: block; height: 0.35rem; margin-top: 4px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.rate-bar i { display: block; height: 100%; border-radius: inherit; background: var(--ready); transition: width 0.6s ease; }
+
 /* ---- queue cards: seven tiles in two columns ---- */
 .queue-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)); gap: 16px; }
 .queue-card {
@@ -139,11 +150,15 @@ h1, h2, h3, p, dl, dd { margin: 0; }
   display: flex; flex-direction: column; gap: 4px;
   border-radius: 12px; padding: 12px 18px 14px; border: 1px solid transparent;
 }
-.tile dt { font-size: 1.05rem; font-weight: 700; }
+.tile dt { font-size: 1.05rem; font-weight: 700; line-height: 1.2; }
 .tile dd {
   font-family: var(--font-num); font-weight: 900; font-size: 2.9rem; line-height: 1.05;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
 }
+.tile dd small { font-size: 0.5em; font-weight: 700; margin-left: 0.06em; }
+/* cqi: the tile's own width (older browsers keep the normal size) */
+.tile-long { container-type: inline-size; }
+.tile-long dd { font-size: min(2.9rem, 26cqi); }
 .tile-work { background: var(--work-bg); color: var(--work); border-color: var(--amk-line); }
 .tile-free { background: var(--ready-bg); color: var(--ready); }
 .tile-talk { background: var(--talking-bg); color: var(--talking); }
@@ -195,31 +210,27 @@ table.agents { width: 100%; border-collapse: collapse; font-variant-numeric: tab
 .pill-ringing .dot { animation: ring 1s ease-in-out infinite; }
 @keyframes ring { 50% { transform: scale(1.6); opacity: 0.55; } }
 
-/* ---- wide screens (1280 px and up): queues left, agents right, everything on one screen ---- */
+/* ---- wide screens (1280 px and up): overall and queues left, agents right, everything on one screen ---- */
 .board { display: flex; flex-direction: column; gap: 20px; }
+.board-queues { display: flex; flex-direction: column; gap: 20px; }
 @media (min-width: 1280px) {
   .board { display: grid; grid-template-columns: minmax(0, 9fr) minmax(0, 11fr); align-items: start; gap: 20px; }
+  .board-queues { gap: 14px; }
+  .board .section-head { margin-bottom: 6px; }
   .board .queue-grid { grid-template-columns: 1fr; gap: 12px; }
-  .board .queue-card { padding: 12px 16px 14px; gap: 10px; border-radius: 12px; }
+  .board .queue-card { padding: 10px 12px 12px; gap: 8px; border-radius: 12px; }
   .board .queue-head h3 { font-size: 1.3rem; }
-  .board .queue-tiles { gap: 8px; }
-  /* tile sizes follow the screen height so two queue cards fit beside 30 agents */
-  .board .tile { padding: clamp(0.25rem, 0.6vh, 0.6rem) 0.9rem; border-radius: 10px; gap: 2px; }
-  .board .tile dt { font-size: clamp(0.75rem, 1.5vh, 0.95rem); }
-  .board .tile dd { font-size: clamp(1.2rem, 3.3vh, 3rem); }
+  /* overall and queue tiles alike, four across; sizes follow the screen height so both fit beside 30 agents */
+  .board .queue-tiles, .board .overall-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .board .overall-tiles { padding: 12px; border-radius: 12px; }
+  .board .tile { padding: clamp(0.3rem, 1vh, 0.9rem) clamp(0.6rem, 0.9vw, 1rem); border-radius: 10px; gap: 2px; }
+  .board .tile dt { font-size: clamp(0.72rem, 1.45vh, 1rem); }
+  .board .tile dd { font-size: clamp(1.3rem, 4.4vh, 3.8rem); }
+  .board .tile-long dd { font-size: min(clamp(1.3rem, 4.4vh, 3.8rem), 26cqi); }
   .board .agents thead th { white-space: normal; line-height: 1.2; vertical-align: bottom; }
   /* keep all seven columns inside the panel, Work time included */
   .board .agents th, .board .agents td { padding-inline: 0.6rem; }
   .board .agent-name { max-width: 11rem; }
-  .board .queue-grid.is-compact .queue-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  /* a single card has the whole column: larger tiles, readable from across the room */
-  .board .queue-grid.is-single .queue-card { padding: 18px 20px 20px; gap: 14px; }
-  .board .queue-grid.is-single .queue-head h3 { font-size: 1.6rem; }
-  .board .queue-grid.is-single .queue-tiles { gap: 12px; }
-  .board .queue-grid.is-single .tile { padding: clamp(0.5rem, 1.4vh, 1.1rem) 1.1rem; gap: 4px; }
-  .board .queue-grid.is-single .tile dt { font-size: clamp(0.9rem, 1.9vh, 1.2rem); }
-  .board .queue-grid.is-single .tile dd { font-size: clamp(2rem, 6vh, 5rem); }
-  .board .queue-grid.is-compact .tile dt { font-size: clamp(0.7rem, 1.35vh, 0.9rem); }
 }
 
 /* screens narrower than full HD (laptops, 1366-1600 px): narrower agent panel, so slimmer columns */
@@ -258,4 +269,6 @@ table.agents { width: 100%; border-collapse: collapse; font-variant-numeric: tab
   .tile { padding: 10px 14px 12px; }
   .tile dt { font-size: 0.95rem; }
   .tile dd { font-size: 2.3rem; }
+  .tile-long dd { font-size: min(2.3rem, 26cqi); }
+  .overall-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px; gap: 10px; }
 }

@@ -13,8 +13,12 @@ bash .devcontainer/ensure-db.sh
 export DATABASE_URL=postgresql+asyncpg://wallboard:wallboard@127.0.0.1:5432/wallboard
 
 python -c "import uvicorn, fastapi, asyncpg" 2>/dev/null || pip install --user -r backend/requirements.txt
-if [ ! -f frontend/dist/index.html ]; then
-  (cd frontend && npm ci --no-audit --no-fund && npm run build)
+# Build the React app when it is missing or older than its source (e.g. after a git pull).
+if [ ! -f frontend/dist/index.html ] || [ -n "$(find frontend/src frontend/index.html frontend/package-lock.json \
+    -newer frontend/dist/index.html -print -quit)" ]; then
+  echo "Building the wallboard screen..."
+  (cd frontend && { [ -d node_modules ] && [ node_modules/.package-lock.json -nt package-lock.json ] \
+    || npm ci --no-audit --no-fund; } && npm run build)
 fi
 
 pkill -f "uvicorn app.main:create_app|app.serve" 2>/dev/null || true

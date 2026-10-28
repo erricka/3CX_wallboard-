@@ -12,6 +12,11 @@ export function waitTime(seconds) {
   return `${pad(Math.floor(s / 60))}:${pad(s % 60)}`
 }
 
+// 92 -> "92%"; no calls yet -> "—"
+export function percent(value) {
+  return value == null ? '—' : `${value}%`
+}
+
 // Times are shown in the call centre's timezone (from the server), whatever the PC is set to.
 export function clockTime(iso, timeZone) {
   return iso ? new Date(iso).toLocaleTimeString(undefined, { timeZone }) : '—'

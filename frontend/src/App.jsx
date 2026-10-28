@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import AgentTable from './components/AgentTable.jsx'
+import OverallStats from './components/OverallStats.jsx'
 import QueueCards from './components/QueueCards.jsx'
 import ReportDownload from './components/ReportDownload.jsx'
 import logo from './brand/amk-logo-white.svg'
@@ -51,13 +52,23 @@ export default function App() {
         {snapshot ? (
           <>
             <div className="board">
-              <section className="board-queues" aria-labelledby="queues-title">
-                <div className="section-head">
-                  <h2 id="queues-title">Queues</h2>
-                  <span className="section-meta">Today since 00:00</span>
-                </div>
-                <QueueCards queues={snapshot.queues} />
-              </section>
+              <div className="board-queues">
+                <section aria-labelledby="overall-title">
+                  <div className="section-head">
+                    <h2 id="overall-title">Overall</h2>
+                    <span className="section-meta">All calls on the phone system, today since 00:00</span>
+                  </div>
+                  <OverallStats overall={snapshot.overall} />
+                </section>
+
+                <section aria-labelledby="queues-title">
+                  <div className="section-head">
+                    <h2 id="queues-title">Queues</h2>
+                    <span className="section-meta">Today since 00:00</span>
+                  </div>
+                  <QueueCards queues={snapshot.queues} />
+                </section>
+              </div>
 
               <section className="board-agents" aria-labelledby="agents-title">
                 <div className="section-head">

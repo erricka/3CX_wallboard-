@@ -225,6 +225,8 @@ class WallboardService:
             stats = await sync_day(self.client, self.sessionmaker, self.settings, day, self.queue_numbers(),
                                    self.agent_numbers(), staff_exts=self.staff_numbers())
         if day == local_today(self.settings.tz):
+            if stats.overall is None and self._today and self._today.day == day:
+                stats.overall = self._today.overall  # the call log failed this time: keep the last counts
             self._today = stats
         return stats
 

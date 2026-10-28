@@ -130,7 +130,7 @@ def test_build_snapshot_statuses_and_queue_counters():
     assert [a["name"] for a in snap["agents"]][0] == "Bonthoeun Soth"
     assert snap["queues"] == [{"number": "800", "name": "Inbound", "kind": "queue", "agents_in_work": 4, "agents_free": 1,
                                "agents_talk": 1, "calls_waiting": 1, "max_wait_seconds": 42,
-                               "answered": 104, "missed": 14}]
+                               "answered": 104, "missed": 14, "answer_rate": 88}]
 
 
 async def test_client_adapts_to_3cx_top_limit_and_keeps_queue_status():
@@ -389,3 +389,66 @@ async def test_only_ring_group_8001_titled_inbound_queue(tmp_path, monkeypatch):
     service._queues = await service._load_groups()
     assert [(g["Number"], g["Name"], g["kind"]) for g in service._queues] == [("8001", "Inbound Queue", "ring_group")]
     assert service.queue_numbers() == ["8001"] and service.agent_numbers() == {"0360", "0367"}
+
+
+def _real_call(cid, start, direction, call_type, src, dst, status, ring="PT0S", talk="PT0S"):
+    """One call log row in the shape the real v20 PBX returns."""
+    return {"MainCallHistoryId": cid, "Indent": 1, "StartTime": start, "Direction": direction, "CallType": call_type,
+            "SourceDn": src, "DestinationDn": dst, "Status": status, "Answered": status == "Answered",
+            "RingingDuration": ring, "TalkingDuration": talk}
+
+
+def test_overall_counts_every_call_on_the_pbx():
+    from app.stats import call_log_counts, overall_counts
+    from app.wallboard import overall_row
+
+    day = date(2026, 10, 28)
+    rows = [
+        # inbound via ring group 8001: 0366 picks up after 5 s, talks 20 s
+        _real_call("in-1", "2026-10-28T09:06:20.0Z", "Inbound", "Ring Group", "10000", "8001", "Redirected", "PT5S"),
+        _real_call("in-1", "2026-10-28T09:06:20.1Z", "Inbound", "Extension", "10000", "0366", "Answered", "PT4.9S", "PT20S"),
+        # inbound, 0322 takes over from 0367 after 3 s, then transfers to a call script (System: not talk time)
+        _real_call("in-2", "2026-10-28T07:41:26.9Z", "Inbound", "Ring Group", "10000", "8001", "Redirected", "PT3S"),
+        _real_call("in-2", "2026-10-28T07:41:27.0Z", "Inbound", "Extension", "10000", "0367", "Unanswered", "PT3S"),
+        _real_call("in-2", "2026-10-28T07:41:29.9Z", "Inbound", "Extension", "10000", "0322", "Answered", "PT0S", "PT40S"),
+        _real_call("in-2", "2026-10-28T07:42:10.0Z", "Inbound", "System", "10000", "6010", "Answered", "PT0.2S", "PT15S"),
+        # inbound, nobody in ring group 8001 picks up
+        _real_call("in-3", "2026-10-28T04:23:00Z", "Inbound", "Ring Group", "10000", "8001", "Unanswered", "PT0.1S"),
+        # inbound to 0360, busy, goes to voicemail: missed (voicemail is not an answer)
+        _real_call("in-4", "2026-10-28T09:30:52.6Z", "Inbound", "Extension", "10011", "0360", "Unanswered", "PT0.1S"),
+        _real_call("in-4", "2026-10-28T09:30:52.7Z", "Inbound", "System", "10011", "0360", "Answered", "PT0.2S", "PT2M"),
+        # outbound: one answered (60 s), one not
+        _real_call("out-1", "2026-10-28T08:16:31Z", "Outbound", "External", "1521", "10000", "Answered", "PT1S", "PT1M"),
+        _real_call("out-2", "2026-10-28T04:15:52Z", "Outbound", "External", "1521", "10000", "Unanswered", "PT13S"),
+        # internal: a colleague answers (40 s); a queue plays hold music for 30 s and nobody takes it
+        _real_call("int-1", "2026-10-28T02:41:49Z", "Internal", "Extension", "0322", "0524", "Answered", "PT3S", "PT40S"),
+        {**_real_call("int-2", "2026-10-27T03:06:07Z", "Internal", "Queue", "0521", "8004", "Unanswered",
+                      "PT0.1S", "PT30S"), "Answered": True},
+    ]
+    records = [parse_call_record(r, day) for r in rows]
+    o = overall_counts(records)
+    assert (o["total"], o["inbound"], o["outbound"], o["internal"]) == (8, 4, 2, 2)
+    assert (o["inbound_answered"], o["inbound_missed"], o["outbound_answered"], o["internal_answered"]) == (2, 2, 1, 1)
+    assert o["talk_seconds"] == pytest.approx(20 + 40 + 60 + 40)  # no call script, voicemail or hold music
+    assert o["wait_seconds"] == pytest.approx(5 + 3) and o["max_wait_seconds"] == pytest.approx(5)
+
+    row = overall_row(o, calls=[{"Caller": "0322 Sovan", "Callee": "0524 Vireakboth", "Status": "Talking"}])
+    assert row["answer_rate"] == 50 and row["avg_talk_seconds"] == 40 and row["avg_wait_seconds"] == 4
+    assert row["calls_now"] == 1 and row["total_calls"] == 8
+
+    # The same rules for agents and the ring group: voicemail is a missed call, hold music no talk time.
+    agents, groups = call_log_counts(records, {"0360", "0366", "0367"}, ["8001"], staff_exts={"0322", "0360", "0521"})
+    assert (agents["0360"]["inbound"], agents["0360"]["missed"], agents["0360"]["talk_seconds"]) == (0, 1, 0)
+    assert (agents["0366"]["inbound"], agents["0366"]["talk_seconds"]) == (1, 20)
+    assert groups["8001"] == {"name": "", "received": 3, "answered": 2, "missed": 1}
+
+
+def test_overall_directions_without_a_direction_field():
+    from app.stats import overall_counts
+
+    day = date(2026, 10, 28)
+    rows = [{"MainCallHistoryId": cid, "Indent": 0, "SourceDn": src, "DestinationDn": dst, "Answered": True,
+             "TalkingDuration": "PT10S"} for cid, src, dst in
+            [("a", "+855", "101"), ("b", "101", "+855"), ("c", "101", "102"), ("d", "101", "800")]]
+    o = overall_counts([parse_call_record(r, day) for r in rows], {"101", "102", "800"})
+    assert (o["inbound"], o["outbound"], o["internal"], o["talk_seconds"]) == (1, 1, 2, 40)

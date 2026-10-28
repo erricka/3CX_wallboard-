@@ -1,4 +1,5 @@
-import { waitTime } from '../format.js'
+import { percent, waitTime } from '../format.js'
+import Tiles from './Tiles.jsx'
 
 // [snapshot field, label, tile colour, formatter]
 const TILES = [
@@ -9,6 +10,7 @@ const TILES = [
   ['max_wait_seconds', 'Max Wait Time', 'plain', waitTime],
   ['answered', 'Answered Calls', 'plain'],
   ['missed', 'Missed Calls', 'plain'],
+  ['answer_rate', 'Answer Rate', 'plain', percent],
 ]
 
 function QueueCard({ queue: q, showKind }) {
@@ -21,14 +23,7 @@ function QueueCard({ queue: q, showKind }) {
           {q.number}
         </span>
       </header>
-      <dl className="queue-tiles">
-        {TILES.map(([key, label, tone, format]) => (
-          <div key={key} className={`tile tile-${tone}`}>
-            <dt>{label}</dt>
-            <dd>{format ? format(q[key]) : q[key]}</dd>
-          </div>
-        ))}
-      </dl>
+      <Tiles tiles={TILES} data={q} className="queue-tiles" />
     </article>
   )
 }
@@ -37,9 +32,8 @@ export default function QueueCards({ queues }) {
   if (queues.length === 0) return <p className="empty">No queues found on the PBX.</p>
   // Label ring groups only when they are shown next to queues.
   const mixed = new Set(queues.map((q) => q.kind)).size > 1
-  // Three or more cards: tiles four across so every card fits beside the agents. One card: bigger tiles.
   return (
-    <div className={`queue-grid${queues.length >= 3 ? ' is-compact' : ''}${queues.length === 1 ? ' is-single' : ''}`}>
+    <div className="queue-grid">
       {queues.map((q) => <QueueCard key={q.number} queue={q} showKind={mixed} />)}
     </div>
   )

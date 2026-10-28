@@ -9,6 +9,7 @@ Per agent and day:
   work_seconds     time logged in to the queue(s)      (ReportAgentLoginHistory, or the
                                                        wallboard's own status log as fallback)
 Per queue and day: received / answered / missed       (ReportQueuePerformanceTotals)
+Per day, every call on the PBX: totals by direction, answered, missed, talk and wait time (call log)
 """
 
 import asyncio
@@ -22,7 +23,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .config import Settings
-from .models import AgentDailyStats, AgentSession, AgentStatusLog, CallRecord, Meta, QueueDailyStats, SyncedDay
+from .models import (AgentDailyStats, AgentSession, AgentStatusLog, CallRecord, Meta, OverallDailyStats,
+                     QueueDailyStats, SyncedDay)
 from .parsing import parse_datetime, parse_duration
 from .threecx import ThreeCXClient, ThreeCXError
 from .timeutil import day_bounds_utc, merged_seconds, utcnow
@@ -34,7 +36,7 @@ COMPLETE_GRACE = timedelta(minutes=10)
 # Login history lists sessions by when they started; agents often stay logged in for days.
 LOGIN_LOOKBACK = timedelta(days=7)
 # Bump when the way daily stats are worked out changes: days stored by an older version are fetched again.
-STATS_VERSION = 3
+STATS_VERSION = 4
 
 
 @dataclass
@@ -45,6 +47,8 @@ class DayStats:
     queues: dict[str, dict] = field(default_factory=dict)
     # Agents whose login session was still open when the stats were synced.
     open_sessions: set[str] = field(default_factory=set)
+    # Every call on the PBX (overall_counts); None when the call log could not be read.
+    overall: dict | None = None
 
 
 def empty_agent(name: str = "") -> dict:
@@ -86,6 +90,9 @@ def parse_call_record(row: dict, day: date) -> dict:
     def text(key: str, size: int) -> str:
         return str(row.get(key) or "")[:size]
 
+    # v20 sets Answered on a queue that played hold music to a caller nobody took; Status says "Unanswered".
+    status = str(row.get("Status") or "").lower()
+
     return {
         "day": day,
         # v20 numbers every row CallId 1; MainCallHistoryId is what ties the rows of one call together.
@@ -99,7 +106,7 @@ def parse_call_record(row: dict, day: date) -> dict:
         "destination_name": str(row.get("DestinationDisplayName") or row.get("DestinationCallerId") or "")[:200],
         "action_dn": text("ActionDnDn", 64),
         "action_name": text("ActionDnDisplayName", 200),
-        "answered": bool(row.get("Answered")),
+        "answered": status == "answered" if status else bool(row.get("Answered")),
         "ringing_seconds": parse_duration(row.get("RingingDuration")),
         "talking_seconds": parse_duration(row.get("TalkingDuration")),
         "reason": text("Reason", 200),
@@ -126,6 +133,22 @@ def slow_answer_counts(records: list[dict], extensions: set[str], threshold: flo
             and r["ringing_seconds"] > threshold
         })
     return counts
+
+
+# Call log rows answered by a person: an extension, or the outside party of an outbound call. Voicemail,
+# call scripts and IVRs are "System"; queues and ring groups only pass the call on.
+PERSON_CALL_TYPES = {"extension", "external"}
+# Rows that put a caller through to people: when none of them is answered, the caller was missed.
+RINGING_CALL_TYPES = {"extension", "queue", "ring group"}
+
+
+def _call_type(r: dict) -> str:
+    return str((r.get("raw") or {}).get("CallType") or "").lower()
+
+
+def _talked(r: dict) -> bool:
+    """A person answered this row (not voicemail or an IVR). Builds without CallType count every answer."""
+    return r["answered"] and (_call_type(r) or "extension") in PERSON_CALL_TYPES
 
 
 def _calls(records: list[dict]) -> list[list[dict]]:
@@ -165,7 +188,7 @@ def call_log_counts(records: list[dict], agent_exts: set[str], queue_numbers: li
         main = next((r for r in rows if r["indent"] == 0), rows[0])
         legs = [r for r in rows if r["indent"] > 0] or rows
         direction = _direction(rows)
-        answered_by = {r["destination_dn"] for r in legs if r["answered"] and r["destination_dn"] in agent_exts}
+        answered_by = {r["destination_dn"] for r in legs if _talked(r) and r["destination_dn"] in agent_exts}
         if direction in (None, "inbound"):
             rung = {r["destination_dn"] for r in legs
                     if r["destination_dn"] in agent_exts and r["source_dn"] not in agent_exts}
@@ -176,16 +199,59 @@ def call_log_counts(records: list[dict], agent_exts: set[str], queue_numbers: li
         if caller in agent_exts and placed:
             agents.setdefault(caller, empty_agent())["outbound"] += 1
         for r in legs:
-            if r["answered"]:
+            if _talked(r):
                 for ext in {r["source_dn"], r["destination_dn"]} & agent_exts:
                     agents.setdefault(ext, empty_agent())["talk_seconds"] += r["talking_seconds"]
-        picked_up = any(r["answered"] and r["destination_dn"] in staff for r in rows)
+        picked_up = any(_talked(r) and r["destination_dn"] in staff for r in rows)
         for q in {r[k] for r in rows for k in ("source_dn", "destination_dn", "action_dn")} & set(queues):
             queues[q]["received"] += 1
             queues[q]["answered"] += picked_up
     for q in queues.values():
         q["missed"] = max(q["received"] - q["answered"], 0)
     return agents, queues
+
+
+def empty_overall() -> dict:
+    return {"total": 0, "inbound": 0, "outbound": 0, "internal": 0, "inbound_answered": 0, "inbound_missed": 0,
+            "outbound_answered": 0, "internal_answered": 0, "talk_seconds": 0.0, "wait_seconds": 0.0,
+            "max_wait_seconds": 0.0}
+
+
+def overall_counts(records: list[dict], internal_numbers: set[str] = frozenset()) -> dict:
+    """Every call on the PBX that day, whoever took part.
+
+    total = inbound + outbound + internal. An inbound call is answered when a person picked it up
+    and missed when it rang an extension, queue or ring group but nobody did (an IVR or voicemail
+    taking it counts as neither). Talk time adds up the answered calls' conversations; wait time is
+    how long an answered inbound caller waited until a person picked up. internal_numbers (the PBX's
+    extensions, queues and ring groups) tell the directions apart on builds without a Direction field.
+    """
+    o = empty_overall()
+    for rows in _calls(records):
+        direction = _direction(rows)
+        if direction is None:
+            main = next((r for r in rows if r["indent"] == 0), rows[0])
+            if main["source_dn"] not in internal_numbers:
+                direction = "inbound"
+            else:
+                direction = "internal" if main["destination_dn"] in internal_numbers else "outbound"
+        direction = direction if direction in ("inbound", "outbound") else "internal"
+        o["total"] += 1
+        o[direction] += 1
+        talked = [r for r in rows if _talked(r)]
+        if not talked:
+            if direction == "inbound" and any((_call_type(r) or "extension") in RINGING_CALL_TYPES for r in rows):
+                o["inbound_missed"] += 1
+            continue
+        o[f"{direction}_answered"] += 1
+        o["talk_seconds"] += sum(r["talking_seconds"] for r in talked)
+        starts = [r["start_time"] for r in rows if r["start_time"]]
+        picked = [r["start_time"] + timedelta(seconds=r["ringing_seconds"]) for r in talked if r["start_time"]]
+        if direction == "inbound" and starts and picked:
+            wait = max((min(picked) - min(starts)).total_seconds(), 0.0)
+            o["wait_seconds"] += wait
+            o["max_wait_seconds"] = max(o["max_wait_seconds"], wait)
+    return o
 
 
 def parse_sessions(rows: list[dict]) -> list[tuple[str, str, datetime, datetime | None]]:
@@ -266,6 +332,7 @@ async def sync_day(client: ThreeCXClient, sessionmaker: async_sessionmaker, sett
         v["name"] = names.get(q, v["name"])
     if queue_rows and any("QueueReceivedCount" in r for r in queue_rows):
         queues.update({q: v for q, v in queue_counts(queue_rows).items() if not queue_numbers or q in queue_numbers})
+    overall = overall_counts(records, set(staff_exts) | agent_exts | set(queue_numbers)) if log_rows is not None else None
     slow = slow_answer_counts(records, agent_exts | set(agents), settings.slow_answer_seconds)
     for ext, count in slow.items():
         agents.setdefault(ext, empty_agent())["unanswered_slow"] = count
@@ -291,6 +358,9 @@ async def sync_day(client: ThreeCXClient, sessionmaker: async_sessionmaker, sett
             await session.execute(pg_insert(QueueDailyStats), [{"day": day, "queue": q, **v} for q, v in queues.items()])
         if records:
             await session.execute(pg_insert(CallRecord), records)
+        if overall is not None:  # without a call log, keep the last overall counts stored for the day
+            await session.execute(delete(OverallDailyStats).where(OverallDailyStats.day == day))
+            await session.execute(pg_insert(OverallDailyStats), [{"day": day, **overall}])
         if login_rows is not None and sessions:
             await session.execute(pg_insert(AgentSession), [
                 {"day": day, "extension": e, "queue": q, "logged_in_at": s, "logged_out_at": o}
@@ -303,7 +373,7 @@ async def sync_day(client: ThreeCXClient, sessionmaker: async_sessionmaker, sett
             index_elements=[SyncedDay.day], set_={"synced_at": now, "complete": complete}))
 
     log.info("Synced %s: %d agents, %d queues, %d call log rows", day, len(agents), len(queues), len(records))
-    return DayStats(day=day, synced_at=now, agents=agents, queues=queues, open_sessions=open_now)
+    return DayStats(day=day, synced_at=now, agents=agents, queues=queues, open_sessions=open_now, overall=overall)
 
 
 async def incomplete_days(sessionmaker: async_sessionmaker, days: list[date]) -> list[date]:
