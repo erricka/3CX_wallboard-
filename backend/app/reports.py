@@ -13,7 +13,7 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Agent, AgentDailyStats, CallRecord, OverallDailyStats, Queue, QueueDailyStats
+from .models import Agent, AgentDailyStats, CallRecord, OverallDailyStats, Queue
 from .timeutil import PERIODS
 
 COUNT_FIELDS = ("inbound", "outbound", "missed", "unanswered_slow")
@@ -33,9 +33,8 @@ class ReportData:
     generated_at: datetime
     slow_seconds: int
     agents: list[tuple[str, str]] = field(default_factory=list)  # (extension, name)
-    queues: list[tuple[str, str]] = field(default_factory=list)  # (number, name)
+    queues: list[tuple[str, str]] = field(default_factory=list)  # (number, name): their members are the agents
     agent_daily: dict[tuple[date, str], dict] = field(default_factory=dict)
-    queue_daily: dict[tuple[date, str], dict] = field(default_factory=dict)
     overall_daily: dict[date, dict] = field(default_factory=dict)
     calls: list[CallRecord] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -52,9 +51,6 @@ class ReportData:
 
     def agent_day(self, day: date, ext: str) -> dict:
         return self.agent_daily.get((day, ext)) or {f: 0 for f in COUNT_FIELDS + TIME_FIELDS}
-
-    def queue_day(self, day: date, number: str) -> dict:
-        return self.queue_daily.get((day, number)) or {"received": 0, "answered": 0, "missed": 0}
 
     def overall_day(self, day: date) -> dict:
         return self.overall_daily.get(day) or {f: 0 for f in OVERALL_FIELDS}
@@ -84,12 +80,6 @@ async def load_report(session: AsyncSession, period: str, days: list[date], tz: 
         data.agent_daily[(row.day, row.extension)] = {f: getattr(row, f) for f in COUNT_FIELDS + TIME_FIELDS}
         names.setdefault(row.extension, row.name)
     data.agents = sorted(((e, names.get(e) or e) for e in agent_exts), key=lambda a: (a[1].casefold(), a[0]))
-
-    queue_numbers = [n for n, _ in data.queues]
-    for row in (await session.execute(select(QueueDailyStats).where(
-            QueueDailyStats.day.in_(days), QueueDailyStats.queue.in_(queue_numbers)))).scalars():
-        data.queue_daily[(row.day, row.queue)] = {"received": row.received, "answered": row.answered,
-                                                   "missed": row.missed}
 
     for row in (await session.execute(select(OverallDailyStats).where(OverallDailyStats.day.in_(days)))).scalars():
         data.overall_daily[row.day] = {f: getattr(row, f) for f in OVERALL_FIELDS}
@@ -195,13 +185,6 @@ def to_xlsx(data: ReportData) -> bytes:
     ws.cell(row=row, column=1, value="All calls on the PBX").font = Font(bold=True, size=12)
     row = _write_table(ws, row + 1, ["Period", *OVERALL_HEADERS], [[data.title, *_overall_cells(data.overall_total())]],
                        _overall_formats(2)) + 1
-    ws.cell(row=row, column=1, value="Queues and ring groups").font = Font(bold=True, size=12)
-    queue_rows = []
-    for number, name in data.queues:
-        t = _totals([data.queue_day(d, number) for d in data.days], ("received", "answered", "missed"))
-        queue_rows.append([name, number, t["received"], t["answered"], t["missed"], _rate(t["answered"], t["received"])])
-    row = _write_table(ws, row + 1, ["Queue / ring group", "Number", "Received calls", "Answered calls", "Missed calls", "Answer rate"],
-                       queue_rows, {6: "0.0%"}) + 1
     ws.cell(row=row, column=1, value="Agents").font = Font(bold=True, size=12)
     agent_rows = []
     for ext, name in data.agents:
@@ -236,19 +219,6 @@ def to_xlsx(data: ReportData) -> bytes:
     _write_table(ws, 1, ["Date", *OVERALL_HEADERS], rows, {1: "yyyy-mm-dd", **_overall_formats(2)})
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(OVERALL_HEADERS) + 1)}{len(rows) + 1}"
-    _autosize(ws)
-
-    # Daily queue stats
-    ws = wb.create_sheet("Daily Queues")
-    rows = []
-    for day in data.days:
-        for number, name in data.queues:
-            s = data.queue_day(day, number)
-            rows.append([day, name, number, s["received"], s["answered"], s["missed"], _rate(s["answered"], s["received"])])
-    _write_table(ws, 1, ["Date", "Queue / ring group", "Number", "Received calls", "Answered calls", "Missed calls", "Answer rate"],
-                 rows, {1: "yyyy-mm-dd", 7: "0.0%"})
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:G{len(rows) + 1}"
     _autosize(ws)
 
     # Call log
@@ -293,12 +263,6 @@ def to_csv(data: ReportData) -> bytes:
             s = data.agent_day(day, ext)
             w.writerow([day.isoformat(), name, ext, *(s[f] for f in COUNT_FIELDS),
                         _hms(s["talk_seconds"]), _hms(s["work_seconds"])])
-    w.writerow([])
-    w.writerow(["Date", "Queue / ring group", "Number", "Received calls", "Answered calls", "Missed calls"])
-    for day in data.days:
-        for number, name in data.queues:
-            s = data.queue_day(day, number)
-            w.writerow([day.isoformat(), name, number, s["received"], s["answered"], s["missed"]])
     for warning in data.warnings:
         w.writerow(["Note", warning])
     # BOM so Excel opens UTF-8 (Khmer names) correctly.

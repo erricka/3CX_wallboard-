@@ -32,5 +32,3 @@ services:
         value: none
       - key: WALLBOARD_RING_GROUPS
         value: "8001"
-      - key: WALLBOARD_GROUP_NAMES
-        value: "8001=Inbound Queue"

@@ -1,8 +1,8 @@
 # AMK Call Center Wallboard (3CX)
 
 Real-time call-center wallboard for 3CX v20 with downloadable daily reports, styled for AMK Bank
-and built for a large office TV: overall figures for every call on the phone system plus the queues and ring
-groups on the left, up to 30 agents on the right, all on one screen (from 1280 px wide; narrower screens stack them).
+and built for a large office TV: overall figures for every call on the phone system on the left, up to 30 agents
+on the right, all on one screen (from 1280 px wide; narrower screens stack them).
 
 - **Frontend:** React (Vite), built into the same Docker image and served by the backend
 - **Backend:** Python (FastAPI). Polls the 3CX XAPI and pushes updates over a WebSocket.
@@ -27,9 +27,7 @@ Finished days are fetched once and then served from the database. Today is refre
 |---|---|
 | **Overall** tiles | Every call on the PBX today, from the call log (`ReportCallLogData`), one call per `MainCallHistoryId`. Total = inbound + outbound + internal (`Direction`). Answered = a person picked up (an extension, or the outside party of an outbound call); voicemail, call scripts and IVRs (`CallType` *System*) and queue hold music do not count. Inbound missed = rang an extension, queue or ring group but nobody answered. Answer rate = inbound answered ÷ (answered + missed). Avg talk time = talk time of answered calls ÷ answered calls. Avg wait time = how long answered inbound callers waited until a person picked up. Calls in progress = `ActiveCalls` right now. |
 | Agent **Status** | `ActiveCalls`: the agent is on a call → **Talking**, or **Ringing**. Otherwise `Users.QueueStatus`: logged out → **Logoff**. Logged in with profile *Available* → **Ready**. Any other profile (Away, DND, …) shows the profile name. Phone not registered → **Offline**. |
-| Agents in work / free / talk | Queue: agents logged in to the queue / *Ready* / *Talking*. Ring group: members whose phone is online / *Ready* / *Talking* (ring groups have no login). |
-| Calls waiting, Max wait time | `ActiveCalls` whose callee is the queue or ring group and no agent is connected yet. Wait time = now − `LastChangeStatus`. |
-| Answered / Missed calls | Queues: `ReportQueuePerformanceTotals` for today (answered = `ExtensionAnsweredCount`, missed = received − answered). Ring groups, and queues the report leaves out: the call log (`ReportCallLogData`), where a call counts as answered when any extension of the PBX picked it up. |
+| Agents listed | The members of the queues in `WALLBOARD_QUEUES` and the ring groups in `WALLBOARD_RING_GROUPS`. |
 | Inbound calls | `ReportExtensionStatistics.InboundAnsweredCount` |
 | Outbound calls | `OutboundAnsweredCount + OutboundUnansweredCount` |
 | Missed calls (agent) | `InboundUnansweredCount` |
@@ -51,8 +49,8 @@ In the 3CX Admin Console: **Integrations → API → Add**.
 
 ```bash
 cp .env.example .env
-# edit .env: THREECX_CLIENT_SECRET, POSTGRES_PASSWORD, and which cards to show:
-#   WALLBOARD_QUEUES (none = no queues), WALLBOARD_RING_GROUPS, WALLBOARD_GROUP_NAMES (card titles)
+# edit .env: THREECX_CLIENT_SECRET, POSTGRES_PASSWORD, and whose agents to list:
+#   WALLBOARD_QUEUES (none = no queues), WALLBOARD_RING_GROUPS
 ```
 
 `.env` is git-ignored. Never commit your API key.
@@ -134,15 +132,14 @@ The **Download report** button on the wallboard, or
 or a custom **Date Range**: `period=range&start=2026-06-01&end=2026-10-10` (up to 366 days).
 Days not stored yet are fetched from 3CX first, so a long range can take a minute the first time.
 
-The Excel workbook has five sheets:
+The Excel workbook has four sheets:
 
-- **Summary**: overall totals (every call on the PBX), totals per queue and per agent for the period
+- **Summary**: overall totals (every call on the PBX) and totals per agent for the period
 - **Daily Agents**: one row per agent per day (inbound, outbound, missed, unanswered within 5 sec, talk time, work time)
 - **Daily Overall**: the overall figures per day (calls by direction, answered, missed, answer rate, talk and wait time)
-- **Daily Queues**: received / answered / missed / answer rate per day
 - **Call Log**: every call on the PBX, with its direction
 
-The CSV has the same overall, agent and queue rows per day.
+The CSV has the same overall and agent rows per day.
 
 "Last 1 month" covers the last 30 days, including today.
 
@@ -158,4 +155,4 @@ The CSV has the same overall, agent and queue rows per day.
 
 ## Database tables
 
-`agents`, `queues`, `agent_daily_stats`, `queue_daily_stats`, `call_records` (raw 3CX rows kept in `raw` JSONB), `agent_sessions`, `agent_status_log`, `synced_days`. They are created automatically on first start.
+`agents`, `queues`, `agent_daily_stats`, `queue_daily_stats`, `overall_daily_stats`, `call_records` (raw 3CX rows kept in `raw` JSONB), `agent_sessions`, `agent_status_log`, `synced_days`. They are created automatically on first start.
